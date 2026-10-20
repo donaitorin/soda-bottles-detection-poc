@@ -1,0 +1,31 @@
+# Postgres + pgvector (stage 6 catalog) and Label Studio (stage 3 labeling).
+# Credentials come from .env (gitignored); copy .env.example to create it.
+# Data volumes live in ./volumes/, which is gitignored.
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.7-pg16   # PostgreSQL 16 + pgvector, multi-arch (runs natively on Apple Silicon)
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "127.0.0.1:5432:5432"   # localhost only
+    volumes:
+      - ./volumes/postgres:/var/lib/postgresql/data
+      - ./docker/postgres-init:/docker-entrypoint-initdb.d:ro   # enables the vector extension on first start
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      retries: 10
+
+  label-studio:
+    image: heartexlabs/label-studio:1.23.2
+    ports:
+      - "127.0.0.1:8080:8080"   # localhost only
+    environment:
+      LABEL_STUDIO_LOCAL_FILES_SERVING_ENABLED: "true"
+      LABEL_STUDIO_LOCAL_FILES_DOCUMENT_ROOT: /label-studio/files
+    volumes:
+      - ./volumes/label-studio:/label-studio/data
+      # Read-only: Label Studio can read the photos but can never modify data/raw.
+      - ./data:/label-studio/files:ro
