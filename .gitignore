@@ -28,6 +28,15 @@ volumes/
 *.pt
 *.pth
 
+# Uppercase variants (git ignore patterns are case-sensitive on case-sensitive filesystems)
+*.JPG
+*.JPEG
+*.PNG
+*.HEIC
+*.WEBP
+*.TIF
+*.TIFF
+
 # --- Python ---
 .venv/
 __pycache__/
@@ -38,6 +47,9 @@ __pycache__/
 
 # --- Notebooks (outputs are stripped with nbstripout, see CLAUDE.md) ---
 .ipynb_checkpoints/
+
+# --- Handoff notes for the project coordinator: never committed ---
+.handoff/
 
 # --- OS / editor ---
 .DS_Store
