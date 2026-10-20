@@ -1,0 +1,8 @@
+# Settings for scripts/verify_env.py (Stage 0 environment check).
+image: data/test_images          # a file, or a folder (the first image found is used)
+output: data/test_images/verify_output.jpg   # annotated result (gitignored)
+weights_cache: models/torch_cache            # where torchvision downloads the COCO weights
+score_threshold: 0.5             # detections below this confidence are not drawn or counted
+target_class: bottle             # COCO category we care about
+compare_cpu: true                # also time a CPU run, to see whether the accelerator is worth it
+seed: 0
