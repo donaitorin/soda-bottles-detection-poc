@@ -1,0 +1,45 @@
+# --- Data: ignore everything under data/ except .gitkeep files and split lists ---
+data/**
+!data/
+!data/**/
+!data/**/.gitkeep
+!data/splits/
+!data/splits/*.txt
+
+# --- Models / weights ---
+models/**
+!models/
+!models/.gitkeep
+
+# --- Docker volumes (Postgres, Label Studio) and local secrets ---
+volumes/
+.env
+
+# --- Safety net: images, masks, arrays and checkpoints are never committed,
+#     wherever they are. Add explicit exceptions only when a real need appears. ---
+*.jpg
+*.jpeg
+*.png
+*.webp
+*.tif
+*.tiff
+*.heic
+*.npy
+*.pt
+*.pth
+
+# --- Python ---
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# --- Notebooks (outputs are stripped with nbstripout, see CLAUDE.md) ---
+.ipynb_checkpoints/
+
+# --- OS / editor ---
+.DS_Store
+.idea/
+.vscode/
