@@ -1,0 +1,9 @@
+name: soda-poc
+channels:
+  - conda-forge
+  - nodefaults   # never use Anaconda's default channels
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+      - -r requirements.txt
