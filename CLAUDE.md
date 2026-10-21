@@ -39,7 +39,7 @@ Learning POC: detect soda bottles in store shelf photos and identify which ones 
 - **Any bottle that is not one of these 10 products ends up as `unknown`** (other brands, water, juice). The detector still labels all of them as `bottle`; the decision is made after the embeddings (see "Unknown handling" in `docs/PLAN.md`).
 - The test split is not used to tune anything before stage 8.
 - Photos are split by store or shelf, never by individual photo.
-- **File names are never committed.** Photo file names contain uploader names and store names and addresses. From Stage 1 on, each photo gets an anonymous id (`<store_id>_<short hash of the file name>`); the id to file name mapping lives in `data/` (gitignored). Only ids go into `data/splits/*.txt` and anything else committed (reports, configs, docs, test fixtures).
+- **File names are never committed.** Photo file names contain uploader names and store names and addresses. From Stage 1 on, each store gets a code (`s01`, `s02`, ...; assigned once, in sorted store id order; stores added later get the next free code; existing codes are never renumbered) and each photo an anonymous id `<store code>_<first 8 hex of sha256 of the file name>`, e.g. `s07_3fa2c9d1`. Real store ids are not committed either. Two mappings live in `data/` (gitignored): store code to store id, and photo id to file name. Only store codes and photo ids go into `data/splits/*.txt` and anything else committed (reports, configs, docs, test fixtures). Do not rewrite git history.
 - Coordinates: torchvision uses xyxy boxes in pixels; Label Studio uses x, y, width, height as percentages (0 to 100). Every conversion goes through functions with tests.
 
 ## Commands
@@ -51,6 +51,25 @@ conda env create -f environment.yml                       # first setup (only th
 conda env update -n soda-poc -f environment.yml --prune   # after changing environment.yml / requirements.txt
 conda activate soda-poc
 nbstripout --install                                  # one-time per clone: strips notebook outputs on commit
+```
+
+Stage 1 (inside `soda-poc`):
+
+```bash
+python scripts/build_ids.py                      # builds store codes and photo ids in data/id_maps/ (gitignored); safe to rerun
+python scripts/lookup_photo.py s07_3fa2c9d1      # photo id -> path under data/raw/ (needs the local mapping)
+python scripts/build_metadata.py                 # data/metadata.csv (gitignored): size, store code, date, flags
+python scripts/find_duplicates.py                # exact + near duplicates; review images and decisions.csv in data/review/duplicates/ (gitignored)
+python scripts/make_exclusions.py                # data/splits/excluded.txt (screenshots; add --apply-duplicate-decisions after the owner confirms decisions.csv)
+python scripts/make_splits.py                    # data/splits/{train,val,test}.txt, strictly by store, fixed seed
+python scripts/check_splits.py                   # Stage 1 gate: no store in two splits, ids only, shares within tolerance
+python scripts/check_no_leaks.py [--staged] [--extra .handoff/latest.md]   # real store ids, names, uploader names, file names in committable files
+```
+
+Pre-commit leak check (the owner runs this once per clone; the assistant never installs it):
+
+```bash
+bash scripts/hooks/install.sh                    # symlinks scripts/hooks/pre-commit into .git/hooks; it runs check_no_leaks.py --staged in the soda-poc env
 ```
 
 More commands are added as they are created.

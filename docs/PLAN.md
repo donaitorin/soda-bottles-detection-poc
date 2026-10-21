@@ -128,10 +128,10 @@ There are ten stages in order, and each one ends with a validation gate. Do not 
 1. Copy the ~300 photos into `data/raw/` and never modify them. Check with `git status` that none of them shows up before making any commit.
 2. Fix EXIF orientation (`ImageOps.exif_transpose` from Pillow). Rotated phone photos are the most common cause of shifted boxes.
 3. Remove duplicates and near duplicates with perceptual hashing (`imagehash`).
-4. Give each photo an anonymous id, `<store_id>_<short hash of the file name>`. Original file names contain uploader names and store names and addresses, so **file names are never committed**: the id to file name mapping lives in `data/` (gitignored), and only ids go into `data/splits/*.txt` and anything else that is committed (reports, configs, docs, test fixtures).
+4. Give each store a code (`s01`, `s02`, ...; assigned once, in sorted store id order; stores added later get the next free code; existing codes are never renumbered) and each photo an anonymous id `<store code>_<first 8 hex of sha256 of the file name>`, for example `s07_3fa2c9d1`. Original file names contain uploader names and store names and addresses, and store ids are not committed either, so **file names and real store ids are never committed**: two mappings live in `data/` (gitignored), store code to store id and photo id to file name. Only store codes and photo ids go into `data/splits/*.txt` and anything else that is committed (reports, configs, docs, test fixtures).
 5. Record resolution, store and date of each photo in a CSV inside `data/` (gitignored, keyed by id).
 6. Exclude the 4 screenshots (`Captura de pantalla ...`) through an exclusion list; they are never deleted or moved in `data/raw/`. Flag photos whose long side is under 800 px so the owner can decide on them.
-7. Split 70 / 15 / 15 **strictly by store**, not by photo and not by (store, visit date): the same shelf on two dates looks almost identical and would leak between splits. The 48-photo store goes to train; the other stores are assigned to reach 70 / 15 / 15 by photo count within about ±5 points, with a fixed seed.
+7. Split 70 / 15 / 15 **strictly by store**, not by photo and not by (store, visit date): the same shelf on two dates looks almost identical and would leak between splits. The 48-photo store goes to train; the other stores are assigned to reach 70 / 15 / 15 by photo count within about ±5 points, with a fixed seed. Among the valid assignments prefer the one with the most stores in val and test, then the most visits; the smallest deviation is only the last tie-break. The seed and the store assignment (store codes) are recorded in the report.
 8. Freeze test: it is not looked at or used to tune anything until stage 8.
 
 **Gate:** no store appears in two splits, `data/splits/*.txt` contain only anonymous ids, and there is a report with the number of photos, resolutions and stores per split.
@@ -154,15 +154,15 @@ There are ten stages in order, and each one ends with a validation gate. Do not 
 
 **Goal:** turn the pre-labels into a reliable dataset in COCO format.
 
-1. Create the project with a `RectangleLabels` configuration using the classes from stage 0.
+1. Create the project with a `RectangleLabels` configuration using the classes from stage 0 (only `bottle`), plus a per-photo multi-select `Choices` field: "Which target products appear in this photo?", with the 10 product ids and "other bottles present". It takes seconds per photo and is not a per-box label.
 2. Import the tasks with their predictions and correct them: delete false positives, add missing bottles, adjust boxes.
 3. Label val and test with the same process, but verify every single box: they are the yardstick for everything.
 4. Do a second review of 10% of the photos, ideally by another person or by yourself on a different day.
 5. Export to COCO and run a sanity script: boxes inside the image, area greater than zero, no duplicates (IoU greater than 0.9), reasonable count per photo.
 6. Draw the boxes on 20 random photos and look at them.
 7. Record how long it took to correct each photo: it is useful data for the final report.
-8. Report crop counts per product (the 10 ids and `unknown`) for each split. Products with too few train crops are flagged as **low data** and reported separately, not dropped.
-9. Check that val and test contain the target products and some unknowns. If not, rebalance the split before stage 4.
+8. Using the per-photo product field, report the number of photos per product (the 10 ids and "other bottles present") for each split. Products that appear in very few train photos are flagged as **low data** and reported separately, not dropped.
+9. Check that val and test contain every target product and some photos with other bottles. If not, rebalance the split before stage 4.
 
 **Gate:** the sanity script reports no errors, the second review finds few differences, and the 20 drawn photos look right.
 
@@ -173,6 +173,8 @@ There are ten stages in order, and each one ends with a validation gate. Do not 
 1. Evaluate on val the torchvision Faster R-CNN with COCO weights **without training**, using its `bottle` class, which already exists in COCO.
 2. Evaluate Grounding DINO zero-shot on val with the best prompts from stage 2.
 3. Measure mAP@0.5, mAP@0.5:0.95 and recall with `pycocotools` or `torchmetrics`.
+
+4. Report metrics with a bootstrap confidence interval resampled by store (whole stores are resampled, not photos), because val and test hold only a few stores each; the interval tells us how much a difference between two runs means.
 
 **Gate:** both baselines are recorded in `reports/`, using the same evaluation script that will be used later.
 
@@ -191,6 +193,8 @@ There are ten stages in order, and each one ends with a validation gate. Do not 
 6. Full training: SGD with lr 0.005 to 0.01, momentum 0.9, weight decay 1e-4, between 20 and 40 epochs, mixed precision (AMP). Keep the best checkpoint by val mAP.
 7. Error analysis: draw false positives and false negatives on val and group them by cause (occlusion, reflection, small bottle, label error).
 
+8. Report metrics with a bootstrap confidence interval resampled by store (whole stores are resampled, not photos), because val and test hold only a few stores each; the interval tells us how much a difference between two runs means.
+
 **Gate:** val mAP@0.5 clearly beats both baselines, val bottle recall reaches the agreed target (for example 90%), and the main error causes are identified.
 
 ### Stage 6: reference catalog and embeddings
@@ -202,7 +206,10 @@ There are ten stages in order, and each one ends with a validation gate. Do not 
 3. Compute the embedding with DINOv2 (base): a 768-dimension vector, normalized.
 4. Store in pgvector, with columns for product, brand, size, material (PET or glass) and source image, and an HNSW index on cosine distance.
 5. Label the product of the val and test crops (in Label Studio, with `Choices` on each crop): one of the 10 ids or `unknown`. This is the ground truth for this stage (see "Unknown handling" below).
-6. Measure top-1 and top-3 accuracy, brand accuracy (Coca-Cola, Sprite or Pepsi) and a confusion matrix across the 10 products plus `unknown`, plus the unknown metrics below.
+6. Report the number of train crops per product (the 10 ids and `unknown`). Products with too few train crops are flagged as **low data** and reported separately, not dropped.
+7. Measure top-1 and top-3 accuracy, brand accuracy (Coca-Cola, Sprite or Pepsi) and a confusion matrix across the 10 products plus `unknown`, plus the unknown metrics below.
+
+8. Report metrics with a bootstrap confidence interval resampled by store (whole stores are resampled, not photos), because val and test hold only a few stores each; the interval tells us how much a difference between two runs means.
 
 **Gate:** brand accuracy is high, unknown handling is measured, and confusions between products are identified by name (for example, `coca_classic` versus `coca_classic_returnable`). If product photos and shelf photos end up far apart in the embedding space, open sub-stage 6b: fine tune DINOv2 with metric learning (contrastive or triplet loss) using pairs of train crops.
 
@@ -240,6 +247,8 @@ Any bottle that is not one of the 10 target products must end up as `unknown`. T
 2. Combine them into a simple score: a weighted sum or a logistic regression trained on val.
 3. Calibrate on val the thresholds for the three outcomes: automatic, human review and unknown, using the rejection rules from "Unknown handling" in stage 6. Cosine similarity is not a probability: 0.94 does not mean 94% certainty. Val must contain labeled `unknown` crops, otherwise this step cannot be done.
 4. Evaluate **only once** on test, with the thresholds already fixed.
+
+5. Report metrics with a bootstrap confidence interval resampled by store (whole stores are resampled, not photos), because val and test hold only a few stores each; the interval tells us how much a difference between two runs means.
 
 **Gate:** on test, the rate of confident wrong identifications stays below 5% (the target from the original document), the false known rate (truly unknown crops assigned to a target product with `automatic` status) stays below 5%, and the percentages falling into automatic, review and unknown are reported.
 

@@ -35,18 +35,18 @@ There is **one class: `bottle`**. Label every soda-style bottle the same way, wh
 
 ## Real examples from the photos (gate: at least 5)
 
-Photos are identified by store id and the trailing photo number, because the full file names contain uploader names and store addresses and must never be committed. Find one with `ls data/raw | grep <store> | grep <number>`.
+Photos are identified by anonymous photo id (`<store code>_<hash>`), because the full file names contain uploader names and store addresses and must never be committed. Find a file with `python scripts/lookup_photo.py <photo id>`.
 
 | # | Photo | What is ambiguous | Case | My default |
 |---|-------|-------------------|------|------------|
-| A | store 500457984, `PHOTO-000153` and `PHOTO-000158` | Large 2-3 L bottles on a pallet, the lower layers wrapped in plastic in groups. Bottles overlap and the wrap blurs the outline. | 6 | One box per bottle whose outline is clear; skip those showing only a sliver. |
-| B | store 500294593, `PHOTO-000001`; store 500314265, `PHOTO-000160` | Returnable bottles standing in red and blue crates. The crate walls hide the lower body, and the bottles inside have only cap and shoulders visible. | 1, 2b | Label only the clearly visible ones (about 40% of the bottle visible); otherwise skip. |
-| C | store 500458029, `PHOTO-000193`; store 500280016, `PH-000327` | "Pack ahorro" promo sleeves tie a Coca-Cola bottle to a Fanta bottle. The sleeve covers most of the label, so the product is hard to see. | 14 | One box per bottle. The class stays `bottle`; Stage 6 will likely send these to `review` or `unknown`. |
-| D | store 501101631, `PH-000010` (the test photo) | Juice **cartons** (Vivo) at the top shelf. The pretrained COCO detector boxes them as `bottle` with 0.5 to 0.85 confidence. | 15 | Do not label cartons. This is the kind of false positive fine tuning must remove. |
-| E | store 500353325, `94ad1752.jpg` | Wide shot of a drinks aisle and a fridge. Dozens of bottles in the background are only a few tens of pixels tall. | 8 | Skip bottles below the provisional ~20 px threshold; it is revisited in Stage 2. |
-| F | store 500314265, `PHOTO-000182` | A 3-row Coca-Cola display where the top rows are cut by the shelf above and the photo edge, with 3+ rows of overlapping bottles. | 1, 2, 9 | Label the visible bottles only, box clipped to the image. |
-| G | store 500280430 `PHOTO-000072`, store 501129389 `PHOTO-000079` | Shelves of 6-can multipacks next to a few PET bottles. | 4 | Label the PET bottles, never the cans. |
-| H | store 500367002, `PHOTO-000245` | Small glass bottles of premium tonics and flavored water, next to cans. | 13 | Label as `bottle`. |
+| A | `s14_569b6500` and `s14_46eef7a8` | Large 2-3 L bottles on a pallet, the lower layers wrapped in plastic in groups. Bottles overlap and the wrap blurs the outline. | 6 | One box per bottle whose outline is clear; skip those showing only a sliver. |
+| B | `s05_242677e1`; `s07_694d03ff` | Returnable bottles standing in red and blue crates. The crate walls hide the lower body, and the bottles inside have only cap and shoulders visible. | 1, 2b | Label only the clearly visible ones (about 40% of the bottle visible); otherwise skip. |
+| C | `s16_1ee0e960`; `s02_faf3e2e2` | "Pack ahorro" promo sleeves tie a Coca-Cola bottle to a Fanta bottle. The sleeve covers most of the label, so the product is hard to see. | 14 | One box per bottle. The class stays `bottle`; Stage 6 will likely send these to `review` or `unknown`. |
+| D | the Stage 0 test photo (in `data/test_images/`, not part of `data/raw/`) | Juice **cartons** (Vivo) at the top shelf. The pretrained COCO detector boxes them as `bottle` with 0.5 to 0.85 confidence. | 15 | Do not label cartons. This is the kind of false positive fine tuning must remove. |
+| E | `s10_2962ca81` | Wide shot of a drinks aisle and a fridge. Dozens of bottles in the background are only a few tens of pixels tall. | 8 | Skip bottles below the provisional ~20 px threshold; it is revisited in Stage 2. |
+| F | `s07_cfed3ea4` | A 3-row Coca-Cola display where the top rows are cut by the shelf above and the photo edge, with 3+ rows of overlapping bottles. | 1, 2, 9 | Label the visible bottles only, box clipped to the image. |
+| G | `s03_fadb075c`, `s19_b14dcca4` | Shelves of 6-can multipacks next to a few PET bottles. | 4 | Label the PET bottles, never the cans. |
+| H | `s12_16174372` | Small glass bottles of premium tonics and flavored water, next to cans. | 13 | Label as `bottle`. |
 
 ## Data quirks seen while browsing
 
