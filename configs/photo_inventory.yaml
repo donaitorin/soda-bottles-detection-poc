@@ -1,0 +1,8 @@
+# Settings for scripts/inventory_photos.py (read-only look at data/raw).
+raw_dir: data/raw
+output_csv: data/inventory_preview.csv   # gitignored; contains file names, never commit
+# Names look like "<store_id>_<STORE NAME ADDRESS>_<uploader>_<dd.mm.yyyy>_<hash>-PHOTO-<n>.jpg".
+# The regexes pull the store id and the visit date out of the file name.
+store_regex: '^(?P<store>\d+)_'
+date_regex: '_(?P<date>\d{2}\.\d{2}\.\d{4})_'
+top_resolutions: 8
