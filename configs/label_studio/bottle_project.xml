@@ -1,0 +1,23 @@
+<View>
+  <!-- Labeling config for the soda bottle POC. One generic class: bottle. Brand and product are NOT labeled
+       per box (the embeddings resolve them in stage 6); the Choices field below is a per-PHOTO question. -->
+  <Header value="Photo $photo_id"/>
+  <Image name="image" value="$image" zoom="true" zoomControl="true" rotateControl="false"/>
+  <RectangleLabels name="bottle" toName="image" strokeWidth="2" opacity="0.15">
+    <Label value="bottle" background="#1e64ff" hotkey="1"/>
+  </RectangleLabels>
+  <Header value="Which target products appear in this photo?"/>
+  <Choices name="products" toName="image" choice="multiple" showInline="false">
+    <Choice value="coca_classic"/>
+    <Choice value="coca_classic_returnable"/>
+    <Choice value="coca_zero"/>
+    <Choice value="coca_zero_returnable"/>
+    <Choice value="coca_light"/>
+    <Choice value="sprite"/>
+    <Choice value="sprite_returnable"/>
+    <Choice value="sprite_zero"/>
+    <Choice value="pepsi"/>
+    <Choice value="pepsi_returnable"/>
+    <Choice value="other_bottles_present"/>
+  </Choices>
+</View>
