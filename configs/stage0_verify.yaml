@@ -6,3 +6,6 @@ score_threshold: 0.5             # detections below this confidence are not draw
 target_class: bottle             # COCO category we care about
 compare_cpu: true                # also time a CPU run, to see whether the accelerator is worth it
 seed: 0
+device: auto                     # auto | cpu | mps  (auto = get_device())
+warmup_runs: 2                   # untimed passes before measuring
+timed_runs: 5                    # the median of these is reported

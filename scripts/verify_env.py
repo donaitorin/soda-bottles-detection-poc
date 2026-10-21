@@ -4,6 +4,7 @@ Faster R-CNN run on it?
 Usage: python scripts/verify_env.py --config configs/stage0_verify.yaml [--image PATH]
 """
 import argparse
+import statistics
 import sys
 import time
 from pathlib import Path
@@ -43,16 +44,22 @@ def sync(device: torch.device) -> None:
         torch.cuda.synchronize()
 
 
-def timed_inference(model, image: torch.Tensor, device: torch.device):
+def timed_inference(model, image: torch.Tensor, device: torch.device, warmup: int, repeats: int):
+    """Return (last output, median seconds over `repeats` timed runs)."""
     model.to(device)
     x = image.to(device)
+    times = []
     with torch.inference_mode():
-        model([x])  # warm-up: the first call on MPS/CUDA includes one-time setup cost
+        for _ in range(warmup):  # the first calls on MPS/CUDA include one-time setup cost
+            model([x])
         sync(device)
-        start = time.perf_counter()
-        out = model([x])[0]
-        sync(device)
-    return out, time.perf_counter() - start
+        for _ in range(repeats):
+            start = time.perf_counter()
+            out = model([x])[0]
+            sync(device)
+            times.append(time.perf_counter() - start)
+    # Median, not mean: one slow run (e.g. a background process) should not skew the result.
+    return out, statistics.median(times)
 
 
 def main() -> int:
@@ -64,11 +71,12 @@ def main() -> int:
     torch.manual_seed(cfg["seed"])
 
     # 1. Device
-    device = get_device()
+    # `device: auto` follows get_device(); `cpu` / `mps` force one (useful when MPS is slower than CPU).
+    device = get_device() if cfg["device"] == "auto" else torch.device(cfg["device"])
     print(f"torch {torch.__version__} | torchvision {torchvision.__version__}")
     print(f"cuda available: {torch.cuda.is_available()} | "
           f"mps built: {torch.backends.mps.is_built()}, available: {torch.backends.mps.is_available()}")
-    print(f"get_device() -> {device}")
+    print(f"get_device() -> {get_device()} | device used: {device} (config: {cfg['device']})")
     probe = (torch.ones(3, 3, device=device) @ torch.ones(3, 3, device=device)).sum().item()
     assert probe == 27.0, f"matmul on {device} gave {probe}"
     print(f"tensor op on {device}: OK")
@@ -99,7 +107,7 @@ def main() -> int:
 
     # 4. Inference on the chosen device
     try:
-        out, seconds = timed_inference(model, image, device)
+        out, seconds = timed_inference(model, image, device, cfg["warmup_runs"], cfg["timed_runs"])
     except RuntimeError as err:
         print(f"FAILED on {device}: {err}")
         print("Report this before changing versions; Colab is the fallback.")
@@ -107,7 +115,7 @@ def main() -> int:
     keep = out["scores"] >= cfg["score_threshold"]
     boxes, labels, scores = out["boxes"][keep].cpu(), out["labels"][keep].cpu(), out["scores"][keep].cpu()
     n_target = int((labels == target_id).sum())
-    print(f"{device}: {seconds:.2f} s/image | {len(boxes)} detections >= {cfg['score_threshold']} "
+    print(f"{device}: {seconds:.2f} s/image (median of {cfg['timed_runs']}) | {len(boxes)} detections >= {cfg['score_threshold']} "
           f"({n_target} '{cfg['target_class']}')")
 
     # 5. Annotated output. Boxes are xyxy in pixels, which is what draw_bounding_boxes expects.
@@ -119,7 +127,7 @@ def main() -> int:
 
     # 6. CPU comparison
     if cfg["compare_cpu"] and device.type != "cpu":
-        _, cpu_seconds = timed_inference(model, image, torch.device("cpu"))
+        _, cpu_seconds = timed_inference(model, image, torch.device("cpu"), cfg["warmup_runs"], cfg["timed_runs"])
         print(f"cpu: {cpu_seconds:.2f} s/image | speed-up of {device.type}: {cpu_seconds / seconds:.1f}x")
         if seconds >= cpu_seconds:
             print(f"WARNING: {device.type} is not faster than the CPU. Tell the user; consider Colab.")
