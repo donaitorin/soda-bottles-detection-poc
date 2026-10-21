@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Pre-commit hook: refuse to commit real store ids, store names, uploader names or photo
+# file names. Runs scripts/check_no_leaks.py --staged inside the `soda-poc` conda env.
+# Install with: bash scripts/hooks/install.sh
+set -u
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+# Editors such as VS Code often start git with a minimal PATH, so look for conda explicitly.
+CONDA=""
+for candidate in "${CONDA_EXE:-}" "$(command -v conda 2>/dev/null || true)" \
+    "$HOME/miniconda3/bin/conda" "$HOME/anaconda3/bin/conda" "$HOME/miniforge3/bin/conda" \
+    "$HOME/mambaforge/bin/conda" "/opt/homebrew/Caskroom/miniconda/base/bin/conda" \
+    "/opt/miniconda3/bin/conda"; do
+  if [ -n "$candidate" ] && [ -x "$candidate" ]; then CONDA="$candidate"; break; fi
+done
+
+if [ -z "$CONDA" ]; then
+  echo "pre-commit: BLOCKED. conda was not found, so the leak check could not run." >&2
+  echo "Set CONDA_EXE or add conda to PATH, or edit scripts/hooks/pre-commit." >&2
+  exit 1
+fi
+
+"$CONDA" run --no-capture-output -n soda-poc python "$REPO_ROOT/scripts/check_no_leaks.py" --staged
+status=$?
+if [ $status -ne 0 ]; then
+  echo "pre-commit: BLOCKED. The leak check failed or could not run (exit $status). See the messages above." >&2
+  exit 1
+fi

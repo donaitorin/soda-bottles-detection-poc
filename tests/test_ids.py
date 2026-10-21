@@ -8,7 +8,7 @@ from src.data.ids import assign_store_codes, make_photo_id, parse_name, photo_ha
 
 CFG = yaml.safe_load((Path(__file__).resolve().parents[1] / "configs/stage1.yaml").read_text())
 # Synthetic name with the same shape as the real ones (no real data).
-NAME = "123456789_TEST STORE - ÑUÑOA ST N° 10_jane.doe_01.02.2026_abc123def-PHOTO-000007.jpg"
+NAME = "123456789_TEST STORE - ÑUÑOA ST N° 10_jane.doe_01.02.2026_abc123def-PHOTO-000007.jpg"  # leak-check: allow-synthetic
 
 
 def test_photo_id_format_and_determinism():
@@ -37,7 +37,7 @@ def test_parse_name():
 
 
 def test_parse_name_returns_none_for_screenshots():
-    assert parse_name("Captura de pantalla 2000-01-01 000000.png", CFG["name_regex"]) is None
+    assert parse_name("Captura de pantalla 2000-01-01 000000.png", CFG["name_regex"]) is None  # leak-check: allow-synthetic
 
 
 def test_store_codes_are_stable_when_a_store_is_added():
