@@ -10,3 +10,24 @@ nbstripout==0.8.1
 imagehash==4.3.2
 scipy==1.17.1
 PyWavelets==1.9.0
+# Grounding DINO pre-labeler (stage 2): transformers and everything it pulls in, all pinned
+transformers==5.20.2
+huggingface_hub==2.2.0
+tokenizers==0.23.3
+safetensors==0.8.0
+regex==2026.9.29
+tqdm==4.70.1
+hf-xet==1.7.0
+httpx2==2.16.0
+httpcore2==2.16.0
+h11==0.16.0
+anyio==4.15.1
+idna==3.20
+typer==0.27.3
+click==8.5.0
+rich==15.0.0
+markdown-it-py==4.2.0
+mdurl==0.1.2
+shellingham==1.5.4
+truststore==0.10.5
+annotated-doc==0.0.5
