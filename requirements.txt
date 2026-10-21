@@ -1,7 +1,7 @@
 # Pinned pip dependencies (installed through environment.yml).
 # torch/torchvision: official PyTorch has no conda packages; these wheels include MPS support on Apple Silicon.
-torch==2.8.0
-torchvision==0.23.0
+torch==2.14.1
+torchvision==0.29.1
 pillow==11.3.0
 numpy==2.2.6
 pyyaml==6.0.2
