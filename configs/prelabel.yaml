@@ -1,0 +1,73 @@
+# Settings for the Stage 2 pre-labelers, filters and comparison (src/prelabel, scripts/prelabel_*.py).
+seed: 0
+device: auto                          # auto | cpu | mps (auto = get_device())
+
+# FROZEN after the comparison on 10 train photos: the owner chose Grounding DINO alone. Changing anything in
+# `prelabeler`, `dino` or `filters` changes the config hash that is stored as the model_version of every
+# prediction. The `frcnn` section stays: it is the Stage 4 baseline and a possible fallback.
+prelabeler: grounding_dino
+
+frcnn:
+  weights_cache: models/torch_cache   # torchvision downloads the COCO weights here (gitignored)
+  target_class: bottle                # keep only this COCO class
+  # Dense shelves: the defaults (100 detections, 1000 RPN proposals) truncate full shelves.
+  box_detections_per_img: 300
+  rpn_pre_nms_top_n_test: 3000        # raised in the same proportion as the detections cap (x3)
+  rpn_post_nms_top_n_test: 3000
+  # Low threshold on purpose: deleting a wrong box in Label Studio is faster than drawing a missing one.
+  box_score_thresh: 0.3
+  # min_size / max_size stay at the torchvision defaults (800 / 1333): the model resizes internally and
+  # returns boxes in original-image pixels.
+
+dino:
+  model_id: IDEA-Research/grounding-dino-base
+  revision: 12bdfa3120f3e7ec7b434d90674b3396eccf88eb   # pinned commit on the Hugging Face Hub
+  cache_dir: models/hf_cache          # gitignored
+  prompt: "bottle."                   # lowercase and ending with a dot, per the model card
+  extra_prompts: ["soda bottle.", "plastic bottle."]    # only tried on the comparison photos
+  # The plan's starting value (0.3) returned ZERO boxes on a dense train photo: Grounding DINO scores for
+  # bottles in packed shelves peak around 0.3. 0.2 is a provisional value to be judged on the comparison images.
+  box_threshold: 0.2                  # frozen
+  text_threshold: 0.25                # frozen (the value used in the comparison)
+  box_thresholds_to_report: [0.1, 0.15, 0.2, 0.3]   # box counts at these thresholds go to the comparison CSV
+
+filters:                              # starting values, checked on the comparison images
+  max_area_fraction: 0.20             # a box larger than this share of the image is a whole shelf, not a bottle
+  max_width_fraction: 0.60            # bottles are tall; very wide boxes are shelves or packs
+  nms_iou: 0.7                        # duplicates: class-agnostic NMS
+  contained_fraction: 0.90            # a box this much inside a larger, higher-score box is dropped
+  min_height_fraction: 0.015          # FINAL (owner): boxes under 1.5% of the image height are dropped (also at export and in the Stage 4/5 evaluation)
+  wedge:                              # grey padding at the image sides: exactly RGB (128,128,128) in the photos
+    value: 128
+    tolerance: 2
+    min_component_fraction: 0.002     # ignore tiny grey areas touching the border
+    drop_if_overlap_over: 0.5         # drop a box with more than this share inside the wedge, clip the rest
+
+merge:                                # not used for the pre-labels (kept, unused)
+  iou: 0.55                           # a Grounding DINO box overlapping a Faster R-CNN box above this is dropped
+  prefer: frcnn
+
+compare:
+  output_dir: data/review/prelabel_compare    # gitignored
+  panel_height_px: 900
+  must_include: [s05_242677e1, s07_694d03ff, s07_cfed3ea4, s19_b14dcca4, s12_16174372]  # hard cases from the labeling guide (train)
+  n_highest_resolution: 2             # the largest train photos (Faster R-CNN resizes internally)
+  n_matching_iou: 0.5
+timing:
+  photo_id: s07_cfed3ea4              # a dense train photo
+  warmup_runs: 2
+  timed_runs: 5
+
+run:                                  # scripts/prelabel_run.py: all non-excluded photos, frozen settings
+  output_dir: data/prelabels          # gitignored: predictions.json, run_summary.csv, box_heights.csv
+  resolution_buckets_px: [1200, 1600, 3200]   # long-side limits for the box height statistics
+
+label_studio:
+  images_dir: data/labelstudio/images         # relative symlinks named by photo id (gitignored)
+  tasks_json: data/labelstudio/tasks.json     # import file (gitignored)
+  url_prefix: /data/local-files/?d=labelstudio/images/
+  from_name: bottle                   # name of the RectangleLabels tag in configs/label_studio/bottle_project.xml
+  to_name: image
+  label: bottle
+  check_dir: data/review/ls_check     # converted boxes drawn back on photos (gitignored)
+  n_check_photos: 10
