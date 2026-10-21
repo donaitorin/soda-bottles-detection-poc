@@ -26,7 +26,7 @@ Sizes are what I could read on labels or price tags; most bottles are too small 
 |----|-----------|---------------------|-------|
 | `coca_classic` | 1.5 L clearly legible; 2 to 3 L bottles also appear (shrink-wrapped and loose) | frequent | Present in most stores. |
 | `coca_zero` | 1.5 L legible; larger bottles with a black and red label | frequent | |
-| `coca_light` | large bottles with a silver/white label | occasional | Seen in 3 of 30 photos. |
+| `coca_light` | large bottles with a silver/white label | occasional | Roughly 3 of the 30 photos. |
 | `sprite` | 2 to 2.5 L (clear bottle, green label) | frequent | Green-capped bottles in returnable sections too. |
 | `pepsi` | 2 to 2.5 L (blue label) | frequent | A "2.5 L RETORNABLE" Pepsi also exists (see risks). |
 | `coca_classic_returnable` | about 1.5 L, plus glass in crates | occasional | |
