@@ -27,7 +27,7 @@ OFFLINE: dataset, detector and catalog          ONLINE: each new photo
 
 1. Shelf photos (split by store)                 New photo (never seen by the model)
         |                                                |
-2. Pre-labeling (Grounding DINO + SAM 2)                 v
+2. Pre-labeling (Grounding DINO)                          v
         |                                         Bottle detection (trained Faster R-CNN)  <-- weights from step 5
 3. Manual validation (Label Studio, COCO export)         |
         |                     |                          v
@@ -50,8 +50,9 @@ The offline path produces two things the online path uses: the detector weights 
 
 | Component | Tool | Role in the POC | License |
 | --- | --- | --- | --- |
-| Pre-labeling | Grounding DINO ([grounding-dino-base](https://huggingface.co/IDEA-Research/grounding-dino-base)) via `transformers` | Proposes boxes from a text prompt such as "bottle." | Apache 2.0 |
-| Box refinement | SAM 2 | Fits each box to the actual bottle outline; masks for clean crops | Apache 2.0 |
+| Baseline / fallback pre-labeler | torchvision Faster R-CNN with COCO weights (`bottle` class) | Stage 4 baseline; fallback pre-labeler | BSD-3 |
+| Pre-labeling (chosen) | Grounding DINO ([grounding-dino-base](https://huggingface.co/IDEA-Research/grounding-dino-base)) via `transformers` | Proposes boxes from a text prompt such as "bottle." | Apache 2.0 |
+| Masks for crops (stage 6) | SAM 2 | Box prompts give masks for clean crops; not used in stage 2 | Apache 2.0 |
 | Pre-labeling alternative | [SAM 3](https://github.com/facebookresearch/sam3) | Detects and segments from text in a single model | Meta's own SAM License; review before commercial use |
 | Manual validation | Label Studio Community | Correcting pre-labels and exporting to COCO | Apache 2.0 |
 | Detector | Faster R-CNN ResNet50 FPN v2 (`torchvision`) with COCO weights | Detects `bottle` on the shelf | BSD-3 |
@@ -71,8 +72,9 @@ The plan assumes an own set of shelf photos, a GPU or Apple Silicon accelerator 
 - **Photos:** about 300 supermarket shelf photos with beverages are already available. Each photo contains many bottles, so that should yield thousands of instances, which is enough for the POC.
 - **Version control:** photos and labeling files never go into git. That covers `data/raw/`, the pre-labels, Label Studio exports, the COCO annotations used to train the detector, crops, catalog images, masks, checkpoints and downloaded models. Only code, configs, docs and small reports are committed.
 - **Diversity:** different stores, lighting, angles and distances. Ten photos of the same shelf add less than ten different shelves.
-- **Accelerator:** Grounding DINO, SAM and training need a GPU. On a Mac, PyTorch uses MPS, which is enough for development and small runs; full training or pre-labeling every photo may be faster on Colab or a cloud VM with a 12 to 16 GB GPU.
+- **Accelerator:** Grounding DINO, SAM and training benefit from a GPU. On a Mac, PyTorch uses MPS, which is enough for development and small runs; full training or pre-labeling every photo may be faster on Colab or a cloud VM with a 12 to 16 GB GPU.
 - **Environment:** Python 3.11 in a conda environment (`soda-poc`, conda-forge only, defined in `environment.yml`; torch and torchvision installed with pip because PyTorch has no official conda packages), compatible PyTorch and torchvision versions, Docker for Postgres with pgvector and for Label Studio. Nothing runs in conda's `base` env.
+- **Demo set (decided by the owner, plan only for now):** the current photos are hard field photos and stay as train, val and test. Later the owner adds a fourth set, **demo**, of well-taken photos without extreme cases, to demonstrate the system. It is labeled the same way, never used for training, tuning or calibration, and evaluated once at the end, like test. Ideally it comes from stores not in the current photos; if it shares stores with train, the report says its result is optimistic. Demo photos used for the stage 6 reference catalog are not used to evaluate. The same anonymous id, mapping and leak-check rules apply to the new photos.
 - **Catalog:** closed list of the 10 target products, in `docs/catalog_variants.md`, decided in stage 0.
 
 **Suggested repo structure**
@@ -82,7 +84,7 @@ soda-bottles-detection-poc/
 ├── data/                 # gitignored, except .gitkeep files and splits/
 │   ├── raw/              # the ~300 original photos, never modified (gitignored)
 │   ├── splits/           # train.txt, val.txt, test.txt (anonymous photo ids only, committed)
-│   ├── prelabels/        # Grounding DINO + SAM output (gitignored)
+│   ├── prelabels/        # pre-labeler output (gitignored)
 │   ├── annotations/      # validated COCO from Label Studio (gitignored)
 │   └── catalog/          # reference images per product (gitignored)
 ├── models/               # checkpoints and downloaded weights (gitignored)
@@ -136,33 +138,33 @@ There are ten stages in order, and each one ends with a validation gate. Do not 
 
 **Gate:** no store appears in two splits, `data/splits/*.txt` contain only anonymous ids, and there is a report with the number of photos, resolutions and stores per split.
 
-### Stage 2: pre-labeling with Grounding DINO + SAM 2
+### Stage 2: pre-labeling with Grounding DINO
 
-**Goal:** generate candidate boxes for all photos and measure how good they are.
+**Goal:** generate candidate boxes for all photos and load the predictions into Label Studio. There is no hand-labeled ground truth before pre-labeling: the owner goes straight to correcting pre-labels in stage 3.
 
-1. Run Grounding DINO with the prompt `bottle.`. According to its [model card](https://huggingface.co/IDEA-Research/grounding-dino-base), prompts must be lowercase and end with a dot. Also try `soda bottle.` and `plastic bottle.`.
-2. Start with a box threshold of 0.3 and a text threshold of 0.25, and tune by looking at results.
-3. If bottles come out small in large photos, apply tiling: split the photo into overlapping tiles, detect in each one and merge with NMS. The SAHI library does this.
-4. Filter typical errors: boxes covering a whole shelf, duplicates (NMS) and tiny boxes.
-5. Pass each box to SAM 2 as a prompt, get the mask and recompute the box fitted to the outline. Keep the masks: they are useful in stage 6.
-6. Revisit the provisional ~20 px minimum box height from the labeling guide using the box size distribution (resolutions range from 374 to 4096 px, so measure it on the original image).
-7. Convert to Label Studio JSON with the `predictions` key and type `rectanglelabels`. Careful: Label Studio uses coordinates as **percentages** of image width and height (0 to 100), not pixels.
+1. **Candidates compared:** the torchvision Faster R-CNN with COCO weights (`bottle` class, raised detection and RPN limits, score threshold 0.3) and Grounding DINO, on 10 train photos (the hard cases from the labeling guide, the two highest-resolution photos, one photo per remaining train store, all density levels), side by side in an ignored folder. **The owner chose Grounding DINO alone.** Faster R-CNN stays in the repo as the baseline for stage 4 and as a fallback if correcting dense shelves turns out slow; the merge code is kept but unused.
+2. **Grounding DINO:** `IDEA-Research/grounding-dino-base` (Apache 2.0) via `transformers`, pinned revision, weights cached in `models/hf_cache/`. Prompt `bottle.` (lowercase, ending with a dot, per its [model card](https://huggingface.co/IDEA-Research/grounding-dino-base)), box threshold 0.2 and text threshold 0.25. The box threshold is 0.2 and not the usual 0.3 because 0.3 returned no boxes on a dense shelf. All settings are frozen in `configs/prelabel.yaml`; the hash of that config is stored as the `model_version` of every prediction. It runs on MPS (about 0.4 s per photo), so no Colab is needed.
+3. **Filtering** (every drop counted by reason): boxes covering a whole shelf, duplicates (NMS plus containment at 0.9), boxes shorter than the minimum height (item 4) and boxes inside the grey side wedges (pixels equal to RGB 128,128,128 connected to the border; boxes mostly inside are dropped, the others are clipped).
+4. **Minimum box height (decided by the owner):** a box must be at least **1.5% of the image height** (`min_height_fraction: 0.015` in `configs/prelabel.yaml`, one function shared by the pre-labels, the stage 3 export and the stage 4/5 evaluation). The rule is relative, so photos of any resolution are treated alike, and it is applied automatically so nobody measures by eye. It was chosen from the Grounding DINO height distribution on train photos (see the stage 2 report). If bottles are small in large photos, tiling (SAHI) is an option that needs approval first.
+5. **Label Studio:** the `RectangleLabels` `bottle` config plus the per-photo product `Choices` field (stage 3, item 1), in `configs/label_studio/bottle_project.xml`. Photos are served through relative symlinks named by photo id (no file names in Label Studio, tasks or committed files). Pre-labels are converted to Label Studio `predictions` with tested functions: Label Studio uses coordinates as **percentages** of image width and height (0 to 100), not pixels. Tasks for all non-excluded photos (train, val and test) are imported through the UI.
+6. **Pre-label all non-excluded photos** (253) with the frozen settings. No decision uses val or test results.
 
-**Gate:** hand-label 20 to 30 train photos from scratch. Measure the precision and recall of the pre-labeling against them at IoU 0.5, with and without SAM. If recall is low (for example under 70%), tune prompts, thresholds or tiling before moving on. If SAM does not improve box fit, drop it to keep things simple.
+**Gate:** the converted boxes round-trip in the tests and line up on 3 photos (one portrait, one landscape, one of the largest) in the Label Studio UI; tasks with predictions for all photos import correctly; the final minimum-height rule is decided; no file name appears in any task, config, report or committed file. Pre-label quality (precision and recall at IoU 0.5 against the corrected labels) is measured at the end of stage 3 and is **biased toward the pre-labeler**: annotators tend to accept the boxes they are shown, so it is a lower bound on the real error, not a clean estimate.
 
 ### Stage 3: manual validation in Label Studio
 
 **Goal:** turn the pre-labels into a reliable dataset in COCO format.
 
 1. Create the project with a `RectangleLabels` configuration using the classes from stage 0 (only `bottle`), plus a per-photo multi-select `Choices` field: "Which target products appear in this photo?", with the 10 product ids and "other bottles present". It takes seconds per photo and is not a per-box label.
-2. Import the tasks with their predictions and correct them: delete false positives, add missing bottles, adjust boxes.
+2. Import the tasks with their predictions (from the pre-labeler chosen in stage 2) and correct them: delete false positives, add missing bottles, adjust boxes.
 3. Label val and test with the same process, but verify every single box: they are the yardstick for everything.
 4. Do a second review of 10% of the photos, ideally by another person or by yourself on a different day.
-5. Export to COCO and run a sanity script: boxes inside the image, area greater than zero, no duplicates (IoU greater than 0.9), reasonable count per photo.
+5. Export to COCO and run a sanity script: boxes inside the image, area greater than zero, no duplicates (IoU greater than 0.9), reasonable count per photo. **The export drops every box shorter than 1.5% of the image height** (the stage 2 rule) and the report counts how many were dropped, per split.
 6. Draw the boxes on 20 random photos and look at them.
 7. Record how long it took to correct each photo: it is useful data for the final report.
 8. Using the per-photo product field, report the number of photos per product (the 10 ids and "other bottles present") for each split. Products that appear in very few train photos are flagged as **low data** and reported separately, not dropped.
 9. Check that val and test contain every target product and some photos with other bottles. If not, rebalance the split before stage 4.
+10. Measure the pre-label quality (precision and recall at IoU 0.5 of the original predictions against the corrected labels), per split. Note in the report that this is biased toward the pre-labeler.
 
 **Gate:** the sanity script reports no errors, the second review finds few differences, and the 20 drawn photos look right.
 
@@ -170,9 +172,9 @@ There are ten stages in order, and each one ends with a validation gate. Do not 
 
 **Goal:** know the floor before training.
 
-1. Evaluate on val the torchvision Faster R-CNN with COCO weights **without training**, using its `bottle` class, which already exists in COCO.
-2. Evaluate Grounding DINO zero-shot on val with the best prompts from stage 2.
-3. Measure mAP@0.5, mAP@0.5:0.95 and recall with `pycocotools` or `torchmetrics`.
+1. Evaluate on val the torchvision Faster R-CNN with COCO weights **without training**, using its `bottle` class, which already exists in COCO (the code from stage 2).
+2. Evaluate Grounding DINO zero-shot on val with the frozen settings from stage 2. Remember that val labels were corrected starting from Grounding DINO's own boxes, so this baseline is biased in its favor.
+3. Measure mAP@0.5, mAP@0.5:0.95 and recall with `pycocotools` or `torchmetrics`. **Predictions shorter than 1.5% of the image height are ignored** (neither matched nor counted as false positives), because the ground truth has no boxes that small; the number ignored is reported.
 
 4. Report metrics with a bootstrap confidence interval resampled by store (whole stores are resampled, not photos), because val and test hold only a few stores each; the interval tells us how much a difference between two runs means.
 
@@ -188,6 +190,7 @@ There are ten stages in order, and each one ends with a validation gate. Do not 
     - `box_detections_per_img` from 100 (default) to 300 or more, or bottles get lost on full shelves.
     - Raise `rpn_pre_nms_top_n` and `rpn_post_nms_top_n` in the same proportion.
     - Raise `min_size` and `max_size` of the internal transform if bottles are small, or reuse the tiling from stage 2.
+3b. Predictions shorter than 1.5% of the image height are ignored in every evaluation (neither matched nor false positives), with the same function as in stage 4; training targets use the same floor because the labels already respect it.
 4. Augmentations with `torchvision.transforms.v2` and `tv_tensors.BoundingBoxes`, which transform boxes together with the image: horizontal flip, brightness and color jitter, scale. No large rotations: shelves are photographed upright.
 5. **Sanity check before training for real:** deliberately overfit 10 images. The loss must drop almost to zero and predictions must match the labels. If it does not, there is a bug in the dataset, not in the model.
 6. Full training: SGD with lr 0.005 to 0.01, momentum 0.9, weight decay 1e-4, between 20 and 40 epochs, mixed precision (AMP). Keep the best checkpoint by val mAP.
@@ -202,7 +205,7 @@ There are ten stages in order, and each one ends with a validation gate. Do not 
 **Goal:** identify the product (one of the 10 ids, or `unknown`) of each detected bottle by comparing against a catalog.
 
 1. Build the catalog: 5 to 10 images per product, mixing product photos with real shelf crops. Crops come **only from train**, never from val or test.
-2. Try two cropping methods: the box with a margin of about 10%, and the SAM mask over a neutral background. Keep whichever gives better results.
+2. Try two cropping methods: the box with a margin of about 10%, and the SAM 2 mask (box prompts, Apache 2.0; check its speed on MPS first) over a neutral background. Keep whichever gives better results.
 3. Compute the embedding with DINOv2 (base): a 768-dimension vector, normalized.
 4. Store in pgvector, with columns for product, brand, size, material (PET or glass) and source image, and an HNSW index on cosine distance.
 5. Label the product of the val and test crops (in Label Studio, with `Choices` on each crop): one of the 10 ids or `unknown`. This is the ground truth for this stage (see "Unknown handling" below).
@@ -246,11 +249,11 @@ Any bottle that is not one of the 10 target products must end up as `unknown`. T
 1. Gather the signals per detection: detector score, top-1 similarity, margin between the top-1 product and the best different product, and whether OCR agrees or contradicts.
 2. Combine them into a simple score: a weighted sum or a logistic regression trained on val.
 3. Calibrate on val the thresholds for the three outcomes: automatic, human review and unknown, using the rejection rules from "Unknown handling" in stage 6. Cosine similarity is not a probability: 0.94 does not mean 94% certainty. Val must contain labeled `unknown` crops, otherwise this step cannot be done.
-4. Evaluate **only once** on test, with the thresholds already fixed.
+4. Evaluate **only once** on test, with the thresholds already fixed. When the demo set exists, evaluate it once too, with the same fixed thresholds (it is never used to tune or calibrate anything), excluding any demo photo used for the reference catalog.
 
 5. Report metrics with a bootstrap confidence interval resampled by store (whole stores are resampled, not photos), because val and test hold only a few stores each; the interval tells us how much a difference between two runs means.
 
-**Gate:** on test, the rate of confident wrong identifications stays below 5% (the target from the original document), the false known rate (truly unknown crops assigned to a target product with `automatic` status) stays below 5%, and the percentages falling into automatic, review and unknown are reported.
+**Gate:** on test (and on demo when it exists), the rate of confident wrong identifications stays below 5% (the target from the original document), the false known rate (truly unknown crops assigned to a target product with `automatic` status) stays below 5%, and the percentages falling into automatic, review and unknown are reported.
 
 ### Stage 9: full pipeline and demo
 
@@ -260,6 +263,7 @@ Any bottle that is not one of the 10 target products must end up as `unknown`. T
 2. Also return the photo annotated with boxes, product and status.
 3. Resolve review cases in Label Studio or in a minimal UI.
 4. Measure time per photo and compare it with a manual count of the same shelf.
+5. The final report gives **both numbers**: test (realistic field performance on hard photos) and demo (well-taken photos), and states which one reflects real-world use (test). If the demo set shares stores with train, its number is marked optimistic.
 
 ```json
 {
@@ -284,8 +288,8 @@ Targets are initial hypotheses, as in the original document: the POC exists to f
 
 | Stage | Metric | Measured on | Initial target |
 | --- | --- | --- | --- |
-| 2 | Pre-labeling precision and recall (IoU 0.5) | 20 to 30 hand-labeled train photos | Recall of 70% or more |
 | 3 | Correction minutes per photo | Label Studio | Record, no target |
+| 3 | Pre-label precision and recall (IoU 0.5), biased toward the pre-labeler | corrected labels, per split | Record |
 | 4 | Baseline mAP@0.5, mAP@0.5:0.95, recall | val | Record as floor |
 | 5 | Trained detector mAP@0.5 and recall | val | Beat the baselines; recall of 90% or more |
 | 6 | Brand accuracy (Coca-Cola, Sprite, Pepsi), product top-1 and top-3 | val crops | Brand 90% or more; top-3 80% or more |
@@ -295,6 +299,7 @@ Targets are initial hypotheses, as in the original document: the POC exists to f
 | 7 | Top-1 improvement with OCR versus visual only | val crops | Any improvement on the known confusions |
 | 8 | Rate of confident wrong identifications | test, only once | Below 5% |
 | 8 | Automatic / review / unknown percentage | test | Record |
+| 8 / 9 | Same final metrics on the demo set (evaluated once, reported next to test) | demo | Record |
 | 9 | Time per photo versus manual count | new photos | Record |
 
 ## Risks and common mistakes
@@ -306,7 +311,7 @@ Most problems in a POC like this come from the data, not the model.
 | Data leakage between splits | Excellent test metrics that do not hold on new photos | Split by store or shelf (stage 1) |
 | EXIF orientation | Boxes shifted or rotated relative to the bottle | `exif_transpose` before anything else (stage 1) |
 | Badly converted coordinates | Boxes correct in Python but shifted in Label Studio | Percentages in Label Studio, xyxy pixels in torchvision; test the conversion with one photo |
-| Trusting the pre-labels | The detector learns Grounding DINO's mistakes | Review every box; stage 3 is never skipped |
+| Trusting the pre-labels | The detector learns the pre-labeler's mistakes | Review every box; stage 3 is never skipped |
 | Detection cap | Bottles missing on full shelves even though the model sees them | Raise `box_detections_per_img` (stage 5) |
 | Small bottles in large photos | Low recall in far rows | Tiling or larger `min_size` (stages 2 and 5) |
 | Reflections and occlusion | False negatives on covered or shiny bottles | Brightness augmentations; the guide defines what gets labeled |
@@ -322,7 +327,7 @@ Ordered by the stage where they are used. The torchvision tutorial is the most d
 | Stage | Resource | What for |
 | --- | --- | --- |
 | 2 | [Grounding DINO in Transformers](https://huggingface.co/docs/transformers/model_doc/grounding-dino) | Model usage, prompts and post-processing |
-| 2 | [SAM 2](https://github.com/facebookresearch/sam2) | Segmenting with a box as prompt |
+| 6 | [SAM 2](https://github.com/facebookresearch/sam2) | Segmenting with a box as prompt |
 | 2 | [SAHI](https://github.com/obss/sahi) | Tiled inference for small objects |
 | 3 | [Label Studio: import pre-annotations](https://labelstud.io/guide/predictions) | `predictions` JSON format |
 | 5 | [torchvision detection fine tuning tutorial](https://pytorch.org/tutorials/intermediate/torchvision_tutorial.html) | Dataset, predictor replacement and training loop |

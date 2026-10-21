@@ -14,8 +14,8 @@ Learning POC: detect soda bottles in store shelf photos and identify which ones 
 ## Technical constraints
 
 - **Do not use YOLO or Ultralytics.** The detector is torchvision's Faster R-CNN (`fasterrcnn_resnet50_fpn_v2`).
-- Pre-labeling: Grounding DINO (`IDEA-Research/grounding-dino-base` via `transformers`) and SAM 2. Manual validation in Label Studio.
-- Only dependencies with permissive licenses (MIT, BSD, Apache 2.0). Ask me before adding anything else.
+- Pre-labeling (Stage 2): Grounding DINO (`IDEA-Research/grounding-dino-base` via `transformers`, pinned revision, weights cached in `models/hf_cache/`, prompt `bottle.`, settings frozen in `configs/prelabel.yaml`). The torchvision Faster R-CNN with COCO weights stays in the repo as the Stage 4 baseline and a fallback pre-labeler. SAM 2 is used only in Stage 6 (masks for crops). Manual validation in Label Studio.
+- Permissive licenses (MIT, BSD, Apache 2.0). MPL-2.0 is accepted only for unmodified third-party dependencies. Ask before adding anything else.
 - Python 3.11 in a conda environment named `soda-poc` (conda-forge only), defined in `environment.yml`. Pinned dependencies in `requirements.txt`, installed through the pip section of `environment.yml` (PyTorch has no official conda packages, so torch and torchvision come from pip). No `.venv`, no pyenv.
 - **Never run anything in conda's `base` env.** Every script and test runs inside `soda-poc` (`conda activate soda-poc`, or `conda run -n soda-poc ...`).
 - Fixed random seeds for anything with randomness.
@@ -64,6 +64,16 @@ python scripts/make_exclusions.py                # data/splits/excluded.txt (scr
 python scripts/make_splits.py                    # data/splits/{train,val,test}.txt, strictly by store, fixed seed
 python scripts/check_splits.py                   # Stage 1 gate: no store in two splits, ids only, shares within tolerance
 python scripts/check_no_leaks.py [--staged] [--extra .handoff/latest.md]   # real store ids, names, uploader names, file names (from the local mapping) and anything shaped like a raw photo file name; synthetic fixtures carry the marker `leak-check: allow-synthetic`
+```
+
+Stage 2 (inside `soda-poc`; photo ids only, outputs in ignored folders):
+
+```bash
+python scripts/prelabel_timing.py --model dino    # MPS vs CPU timing on one train photo (also --model frcnn)
+python scripts/prelabel_compare.py                # side-by-side pre-labeler comparison on ~10 train photos -> data/review/prelabel_compare/
+python scripts/prelabel_run.py                    # frozen Grounding DINO on all 253 non-excluded photos -> data/prelabels/ (gitignored)
+python scripts/build_ls_tasks.py                 # relative symlinks named by photo id + data/labelstudio/tasks.json (gitignored)
+python scripts/check_ls_conversion.py            # round trip of every converted box; draws 10 photos; lists the 3 photos for the alignment check
 ```
 
 Pre-commit leak check (the owner runs this once per clone; the assistant never installs it):
