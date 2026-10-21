@@ -2,14 +2,14 @@
 
 ## Goal and scope
 
-The POC validates whether, from store shelf photos, a system can detect soda bottles, identify which ones are one of the 8 target products (Coca-Cola, Sprite and Pepsi lines) and send every other bottle to `unknown`, with a low rate of confident wrong identifications. It follows the same architecture as the bathroom asset POC: a generic detector, identification through embeddings, text evidence, and a confidence engine.
+The POC validates whether, from store shelf photos, a system can detect soda bottles, identify which ones are one of the 10 target products (Coca-Cola, Sprite and Pepsi lines) and send every other bottle to `unknown`, with a low rate of confident wrong identifications. It follows the same architecture as the bathroom asset POC: a generic detector, identification through embeddings, text evidence, and a confidence engine.
 
-**Central question:** can the system count and identify the 8 target products in a shelf photo, sending every other bottle to `unknown`, accurately enough to reduce manual counting?
+**Central question:** can the system count and identify the 10 target products in a shelf photo, sending every other bottle to `unknown`, accurately enough to reduce manual counting?
 
 **In scope**
 
 - Generic detection of soda bottles in the photo.
-- Identification of the 8 target products (Coca-Cola Classic, Zero and Light, returnable and non-returnable where applicable, Sprite, Sprite Zero and Pepsi), with every other bottle sent to `unknown`, plus size when visible.
+- Identification of the 10 target products (Coca-Cola Classic, Zero and Light; Sprite and Sprite Zero; Pepsi; with returnable versions where they exist), with every other bottle sent to `unknown`, plus size when visible.
 - OCR of the packaging as additional evidence.
 - Confidence with three outcomes: automatic, human review, unknown.
 - Full pipeline from photo to JSON inventory, with metrics.
@@ -73,7 +73,7 @@ The plan assumes an own set of shelf photos, a GPU or Apple Silicon accelerator 
 - **Diversity:** different stores, lighting, angles and distances. Ten photos of the same shelf add less than ten different shelves.
 - **Accelerator:** Grounding DINO, SAM and training need a GPU. On a Mac, PyTorch uses MPS, which is enough for development and small runs; full training or pre-labeling every photo may be faster on Colab or a cloud VM with a 12 to 16 GB GPU.
 - **Environment:** Python 3.11 in a conda environment (`soda-poc`, conda-forge only, defined in `environment.yml`; torch and torchvision installed with pip because PyTorch has no official conda packages), compatible PyTorch and torchvision versions, Docker for Postgres with pgvector and for Label Studio. Nothing runs in conda's `base` env.
-- **Catalog:** closed list of the 8 target products, in `docs/catalog_variants.md`, decided in stage 0.
+- **Catalog:** closed list of the 10 target products, in `docs/catalog_variants.md`, decided in stage 0.
 
 **Suggested repo structure**
 
@@ -81,7 +81,7 @@ The plan assumes an own set of shelf photos, a GPU or Apple Silicon accelerator 
 soda-bottles-detection-poc/
 ├── data/                 # gitignored, except .gitkeep files and splits/
 │   ├── raw/              # the ~300 original photos, never modified (gitignored)
-│   ├── splits/           # train.txt, val.txt, test.txt (file names only, committed)
+│   ├── splits/           # train.txt, val.txt, test.txt (anonymous photo ids only, committed)
 │   ├── prelabels/        # Grounding DINO + SAM output (gitignored)
 │   ├── annotations/      # validated COCO from Label Studio (gitignored)
 │   └── catalog/          # reference images per product (gitignored)
@@ -113,7 +113,7 @@ There are ten stages in order, and each one ends with a validation gate. Do not 
     - Are bottles in back rows that are only half visible labeled?
     - The box fits the visible part, never the estimated part behind another bottle.
     - Do water or juice bottles count as `bottle`? Recommended: yes, because telling them apart from soda is also the embeddings' job. If the answer is no, the guide says so explicitly, since a class that depends on what is inside the bottle is hard to label consistently.
-3. Define the closed list of catalog products. It has 8 ids, listed in `docs/catalog_variants.md`: `coca_classic`, `coca_classic_returnable`, `coca_zero`, `coca_zero_returnable`, `coca_light`, `sprite`, `sprite_zero` and `pepsi`. Size is secondary metadata, not a hard success criterion. Any other bottle (other brands, water, juice) is `unknown`; there is no `other brand` class. This list is used from stage 6 on, not for the detector.
+3. Define the closed list of catalog products. It has 10 ids, listed in `docs/catalog_variants.md`: `coca_classic`, `coca_classic_returnable`, `coca_zero`, `coca_zero_returnable`, `coca_light`, `sprite`, `sprite_returnable`, `sprite_zero`, `pepsi` and `pepsi_returnable`. Returnable bottles can be PET or glass (glass ones in crates count as returnable products, Classic or Zero). Size and material (PET or glass) are secondary metadata stored in the catalog, not hard success criteria. Any other bottle (other brands, water, juice) is `unknown`; there is no `other brand` class. This list is used from stage 6 on, not for the detector.
 4. Create the `.gitignore` before any photo enters the repo. It ignores everything under `data/` (photos, pre-labels, Label Studio exports, COCO annotations, crops, masks, catalog images) except `.gitkeep` files and `data/splits/*.txt`, plus `models/`, Label Studio and Postgres volumes, and notebook outputs.
 5. Bring up `docker-compose` with Postgres + pgvector and Label Studio. Their data volumes live in ignored folders.
 6. Create the conda environment `soda-poc` (conda-forge only, Python 3.11) from `environment.yml`.
@@ -128,11 +128,13 @@ There are ten stages in order, and each one ends with a validation gate. Do not 
 1. Copy the ~300 photos into `data/raw/` and never modify them. Check with `git status` that none of them shows up before making any commit.
 2. Fix EXIF orientation (`ImageOps.exif_transpose` from Pillow). Rotated phone photos are the most common cause of shifted boxes.
 3. Remove duplicates and near duplicates with perceptual hashing (`imagehash`).
-4. Record resolution, store and date of each photo in a CSV.
-5. Split 70 / 15 / 15 **by store or shelf, not by photo**. Two photos of the same shelf in train and test inflate the metrics.
-6. Freeze test: it is not looked at or used to tune anything until stage 8.
+4. Give each photo an anonymous id, `<store_id>_<short hash of the file name>`. Original file names contain uploader names and store names and addresses, so **file names are never committed**: the id to file name mapping lives in `data/` (gitignored), and only ids go into `data/splits/*.txt` and anything else that is committed (reports, configs, docs, test fixtures).
+5. Record resolution, store and date of each photo in a CSV inside `data/` (gitignored, keyed by id).
+6. Exclude the 4 screenshots (`Captura de pantalla ...`) through an exclusion list; they are never deleted or moved in `data/raw/`. Flag photos whose long side is under 800 px so the owner can decide on them.
+7. Split 70 / 15 / 15 **strictly by store**, not by photo and not by (store, visit date): the same shelf on two dates looks almost identical and would leak between splits. The 48-photo store goes to train; the other stores are assigned to reach 70 / 15 / 15 by photo count within about ±5 points, with a fixed seed.
+8. Freeze test: it is not looked at or used to tune anything until stage 8.
 
-**Gate:** no shelf appears in two splits, and there is a report with the number of photos, resolutions and stores per split.
+**Gate:** no store appears in two splits, `data/splits/*.txt` contain only anonymous ids, and there is a report with the number of photos, resolutions and stores per split.
 
 ### Stage 2: pre-labeling with Grounding DINO + SAM 2
 
@@ -143,7 +145,8 @@ There are ten stages in order, and each one ends with a validation gate. Do not 
 3. If bottles come out small in large photos, apply tiling: split the photo into overlapping tiles, detect in each one and merge with NMS. The SAHI library does this.
 4. Filter typical errors: boxes covering a whole shelf, duplicates (NMS) and tiny boxes.
 5. Pass each box to SAM 2 as a prompt, get the mask and recompute the box fitted to the outline. Keep the masks: they are useful in stage 6.
-6. Convert to Label Studio JSON with the `predictions` key and type `rectanglelabels`. Careful: Label Studio uses coordinates as **percentages** of image width and height (0 to 100), not pixels.
+6. Revisit the provisional ~20 px minimum box height from the labeling guide using the box size distribution (resolutions range from 374 to 4096 px, so measure it on the original image).
+7. Convert to Label Studio JSON with the `predictions` key and type `rectanglelabels`. Careful: Label Studio uses coordinates as **percentages** of image width and height (0 to 100), not pixels.
 
 **Gate:** hand-label 20 to 30 train photos from scratch. Measure the precision and recall of the pre-labeling against them at IoU 0.5, with and without SAM. If recall is low (for example under 70%), tune prompts, thresholds or tiling before moving on. If SAM does not improve box fit, drop it to keep things simple.
 
@@ -158,6 +161,8 @@ There are ten stages in order, and each one ends with a validation gate. Do not 
 5. Export to COCO and run a sanity script: boxes inside the image, area greater than zero, no duplicates (IoU greater than 0.9), reasonable count per photo.
 6. Draw the boxes on 20 random photos and look at them.
 7. Record how long it took to correct each photo: it is useful data for the final report.
+8. Report crop counts per product (the 10 ids and `unknown`) for each split. Products with too few train crops are flagged as **low data** and reported separately, not dropped.
+9. Check that val and test contain the target products and some unknowns. If not, rebalance the split before stage 4.
 
 **Gate:** the sanity script reports no errors, the second review finds few differences, and the 20 drawn photos look right.
 
@@ -190,23 +195,23 @@ There are ten stages in order, and each one ends with a validation gate. Do not 
 
 ### Stage 6: reference catalog and embeddings
 
-**Goal:** identify the product (one of the 8 ids, or `unknown`) of each detected bottle by comparing against a catalog.
+**Goal:** identify the product (one of the 10 ids, or `unknown`) of each detected bottle by comparing against a catalog.
 
 1. Build the catalog: 5 to 10 images per product, mixing product photos with real shelf crops. Crops come **only from train**, never from val or test.
 2. Try two cropping methods: the box with a margin of about 10%, and the SAM mask over a neutral background. Keep whichever gives better results.
 3. Compute the embedding with DINOv2 (base): a 768-dimension vector, normalized.
-4. Store in pgvector, with columns for product, brand, size and source image, and an HNSW index on cosine distance.
-5. Label the product of the val and test crops (in Label Studio, with `Choices` on each crop): one of the 8 ids or `unknown`. This is the ground truth for this stage (see "Unknown handling" below).
-6. Measure top-1 and top-3 accuracy, brand accuracy (Coca-Cola, Sprite or Pepsi) and a confusion matrix across the 8 products plus `unknown`, plus the unknown metrics below.
+4. Store in pgvector, with columns for product, brand, size, material (PET or glass) and source image, and an HNSW index on cosine distance.
+5. Label the product of the val and test crops (in Label Studio, with `Choices` on each crop): one of the 10 ids or `unknown`. This is the ground truth for this stage (see "Unknown handling" below).
+6. Measure top-1 and top-3 accuracy, brand accuracy (Coca-Cola, Sprite or Pepsi) and a confusion matrix across the 10 products plus `unknown`, plus the unknown metrics below.
 
 **Gate:** brand accuracy is high, unknown handling is measured, and confusions between products are identified by name (for example, `coca_classic` versus `coca_classic_returnable`). If product photos and shelf photos end up far apart in the embedding space, open sub-stage 6b: fine tune DINOv2 with metric learning (contrastive or triplet loss) using pairs of train crops.
 
 #### Unknown handling (open-set recognition)
 
-Any bottle that is not one of the 8 target products must end up as `unknown`. The detector still labels every bottle as `bottle` (including water, juice and other brands); the decision happens after the embeddings. Stage 6 builds the pieces and stage 8 calibrates and evaluates them.
+Any bottle that is not one of the 10 target products must end up as `unknown`. The detector still labels every bottle as `bottle` (including water, juice and other brands); the decision happens after the embeddings. Stage 6 builds the pieces and stage 8 calibrates and evaluates them.
 
-1. **Ground truth:** when labeling crops in stage 6, every crop gets one of the 8 ids or `unknown`. Val and test must include enough `unknown` crops (other brands, water, juice). Without labeled unknowns the thresholds cannot be calibrated.
-2. **Negative gallery:** besides the 8 products, the catalog may hold reference images of common non-target bottles (for example water, juices, other sodas), all tagged `unknown`. If the nearest neighbors are mostly from this gallery, the crop is `unknown`. Measure whether this helps compared with thresholds alone.
+1. **Ground truth:** when labeling crops in stage 6, every crop gets one of the 10 ids or `unknown`. Val and test must include enough `unknown` crops (other brands, water, juice). Without labeled unknowns the thresholds cannot be calibrated.
+2. **Negative gallery:** besides the 10 products, the catalog may hold reference images of common non-target bottles (for example water, juices, other sodas), all tagged `unknown`. If the nearest neighbors are mostly from this gallery, the crop is `unknown`. Measure whether this helps compared with thresholds alone.
 3. **Rejection rules,** applied per crop after top-K retrieval:
     - top-1 similarity below a threshold → `unknown`;
     - margin between the best product and the second best *different* product below a threshold → `review`, or `unknown` if the similarity is also low;
@@ -221,7 +226,7 @@ Any bottle that is not one of the 8 target products must end up as `unknown`. Th
 
 1. Run PaddleOCR on each crop.
 2. Normalize the text: uppercase, no accents, no double spaces.
-3. Define keywords per product: "ZERO", "SIN AZUCAR", "LIGHT", "SPRITE", "PEPSI", "RETORNABLE" (the returnable text on the label may be the clearest way to separate returnable from non-returnable bottles), and sizes such as "500 ML", "1,5 L" or "2,25 L".
+3. Define keywords per product: "ZERO", "SIN AZUCAR", "LIGHT", "SPRITE", "PEPSI", "ZERO AZUCARES", "RETORNABLE" (the returnable text on the label may be the clearest way to separate returnable from non-returnable bottles), and sizes such as "500 ML", "1,5 L" or "2,25 L".
 4. Compare with fuzzy matching (`rapidfuzz`), because OCR confuses O with 0 and similar characters.
 5. Measure the percentage of crops in which OCR reads something useful.
 
