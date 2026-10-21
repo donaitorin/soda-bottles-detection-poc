@@ -1,0 +1,36 @@
+# Settings for the Stage 1 scripts (ids, metadata, duplicates, splits).
+raw_dir: data/raw
+protected_dirs: [data/raw, data/test_images]   # photo folders: scripts never write or delete inside them
+id_maps_dir: data/id_maps            # gitignored: real store ids and file names live only here
+metadata_csv: data/metadata.csv      # gitignored
+
+# Photo file names look like
+#   <store_id>_<store name and address>_<uploader>_<dd.mm.yyyy>_<hash>-PHOTO-<n>.jpg
+# Files that do not match (the screenshots) get the store code `sx`.
+name_regex: '^(?P<store>\d+)_(?P<store_name>.+)_(?P<uploader>[^_]+)_(?P<date>\d{2}\.\d{2}\.\d{4})_(?P<tail>[^_]+)\.[A-Za-z]+$'
+store_code_prefix: s
+store_code_width: 2                  # s01 .. s99
+no_store_code: sx
+id_hash_length: 8                    # hex chars of sha256(file name) in the photo id
+
+low_res_long_side_px: 800            # flag photos whose long side is below this
+
+duplicates:
+  hash_size: 16                      # pHash of 16x16 = 256 bits (the default 8x8 gives too many false matches on shelves)
+  max_hamming: 12                    # flag pairs at or below this distance (of 256 bits, about 5%)
+  review_dir: data/review/duplicates # gitignored
+  review_height_px: 700
+
+exclusions:
+  path: data/splits/excluded.txt     # photo ids only (committed); the screenshots plus confirmed duplicate drops
+  duplicate_decisions: data/review/duplicates/decisions.csv
+
+splits:
+  dir: data/splits                   # train.txt, val.txt, test.txt: photo ids only (committed)
+  seed: 42
+  fractions: {train: 0.70, val: 0.15, test: 0.15}
+  tolerance_points: 5                # each split's photo share must be within +-5 points of its target
+  n_shuffles: 10000                  # random store orders tried by the search
+  largest_store_to_train: true       # the biggest store (a fifth of the data) always goes to train
+  id_regex: '^s\d{2}_[0-9a-f]{8}$'               # train / val / test
+  excluded_id_regex: '^s(\d{2}|x)_[0-9a-f]{8}$'  # excluded.txt may also hold sx_ (screenshot) ids
