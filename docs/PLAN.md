@@ -119,7 +119,7 @@ There are ten stages in order, and each one ends with a validation gate. Do not 
 6. Create the conda environment `soda-poc` (conda-forge only, Python 3.11) from `environment.yml`.
 7. Verify that PyTorch sees the accelerator (`torch.cuda.is_available()` on NVIDIA, `torch.backends.mps.is_available()` on Mac).
 
-**Gate:** the guide resolves at least 5 real ambiguous examples taken from your photos, a test script runs on the accelerator, and after copying one test image into `data/raw/`, `git status` does not show it.
+**Gate:** the guide resolves at least 5 real ambiguous examples taken from your photos, the verification script runs on a real photo, and the device decision for local work (MPS or CPU) is recorded in `reports/stage_00.md`, and after copying one test image into `data/raw/`, `git status` does not show it.
 
 ### Stage 1: data inventory and dataset split
 
@@ -231,7 +231,7 @@ Any bottle that is not one of the 8 target products must end up as `unknown`. Th
 
 **Goal:** make the system know when it does not know.
 
-1. Gather the signals per detection: detector score, top-1 similarity, margin between top-1 and top-2, and whether OCR agrees or contradicts.
+1. Gather the signals per detection: detector score, top-1 similarity, margin between the top-1 product and the best different product, and whether OCR agrees or contradicts.
 2. Combine them into a simple score: a weighted sum or a logistic regression trained on val.
 3. Calibrate on val the thresholds for the three outcomes: automatic, human review and unknown, using the rejection rules from "Unknown handling" in stage 6. Cosine similarity is not a probability: 0.94 does not mean 94% certainty. Val must contain labeled `unknown` crops, otherwise this step cannot be done.
 4. Evaluate **only once** on test, with the thresholds already fixed.

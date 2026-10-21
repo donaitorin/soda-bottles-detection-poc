@@ -46,8 +46,8 @@ Learning POC: detect soda bottles in store shelf photos and identify which ones 
 One-time setup (all inside the `soda-poc` env, never in `base`):
 
 ```bash
-conda create -n soda-poc -c conda-forge python=3.11   # first time, then:
-conda env update -n soda-poc -f environment.yml       # installs requirements.txt via pip
+conda env create -f environment.yml                       # first setup (only the file applies `nodefaults`)
+conda env update -n soda-poc -f environment.yml --prune   # after changing environment.yml / requirements.txt
 conda activate soda-poc
 nbstripout --install                                  # one-time per clone: strips notebook outputs on commit
 ```
