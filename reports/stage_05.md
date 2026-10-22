@@ -1,80 +1,103 @@
-# Stage 5 report (in progress): Faster R-CNN fine tuning on pseudo-labels
+# Stage 5 report: Faster R-CNN fine tuning on Grounding DINO pseudo-labels
 
-> **Status: stopped before the full training run, by instruction.** Done: dataset, model, augmentations, learning-rate schedule, checkpoints with resume, MPS timing check, overfit-10 sanity check. Not done: the full run, the comparison with the Stage 4 baseline, the error analysis.
->
-> **The training labels are Grounding DINO pseudo-labels, so the detector will imitate Grounding DINO, errors included, and every val number is agreement with Grounding DINO, not accuracy.** Test is not read by any Stage 5 script.
+> **Every number in this report is agreement with Grounding DINO pseudo-labels, not accuracy.** The train and val labels are the unverified Grounding DINO boxes (owner decision, Stage 3). A high value means "behaves like Grounding DINO", including its mistakes; the detector was trained to imitate them. Test was not read by any Stage 5 script. Only the future owner-corrected demo set will give accuracy.
 
-## What was built
+## Summary
 
-| Piece | File | Role |
-|---|---|---|
-| Dataset | `src/detection/dataset.py` | reads the COCO file; COCO `[x, y, w, h]` to torchvision xyxy pixels (tested); label 1 = `bottle`; photos with no boxes allowed; augmentations that move boxes with the image |
-| Model | `src/detection/model.py` | `fasterrcnn_resnet50_fpn_v2` with COCO weights, new 2-class box predictor, dense-shelf settings (300 detections, RPN counts raised) |
-| Engine | `src/detection/engine.py` | warmup + cosine learning rate (tested), one training epoch with a finite-loss check, prediction, agreement metrics (same evaluation code as Stage 4), atomic checkpoints |
-| Scripts | `scripts/train_timing.py`, `scripts/train_detector.py` | timing and memory check; overfit sanity check; full run with a checkpoint every epoch, `--resume`, CSV log |
-| Config | `configs/stage5.yaml` | all settings |
-| Tests | `tests/test_detection.py` (8), `tests/test_check_no_leaks_script.py` (2) | box conversion, flip moves the box with the pixels, empty photos, schedule, agreement, checkpoint round trip; the leak check script always prints a summary and fails on a missing `--extra` file |
+- The full run finished without interruption or error (30 epochs, 2,566 s of training, about 85 s per epoch; the console log shows one line per epoch and no resume).
+- **Gate: met, as agreement.** The fine-tuned model clearly beats the Faster R-CNN COCO baseline in the paired bootstrap by store (AP@0.5 +5.4 points, interval [3.7, 11.3], for `best.pt`; +3.0, [1.7, 6.3], for the last epoch, which was not selected on val), and agreement recall at score 0.3 is 94.2% (target 90%). The main disagreements were identified by cause (below): fragments and cans that the pseudo-labels contain and the model copies, and partial overlaps.
+- **Val agreement peaks early** (epoch 5) and then declines slowly while the training loss keeps falling. It is discussed below: it is partly a change in how confident the model is, differences between epochs are small, and `best.pt` was chosen by val AP@0.5, which makes its val number optimistic. A shorter schedule is proposed.
 
-Augmentations (all `torchvision.transforms.v2`, boxes follow the image): horizontal flip, colour jitter, a mild zoom (scale 0.85 to 1.15, no rotation); boxes shrunk below 2 px are dropped. The new predictor starts random; the backbone keeps its COCO weights, with frozen batch-norm statistics and the last three ResNet stages trainable (torchvision's default when pretrained weights are used).
+## Training
 
-## MPS timing and memory (Apple M4 Pro, 24 GB, torch 2.14.1; `scripts/train_timing.py`)
+Settings as approved (`configs/stage5.yaml`): `fasterrcnn_resnet50_fpn_v2` with COCO weights and a new 2-class predictor, 800 px short side, batch 2, SGD (momentum 0.9, weight decay 1e-4), lr 0.005 with 1-epoch warmup and cosine decay to 0.01 x lr, gradient clipping 10, 30 epochs, seed 0, augmentation: horizontal flip, colour jitter, scale 0.85 to 1.15. Checkpoints were saved every epoch; after the evaluation only `best.pt` (epoch 5) and `epoch_30.pt` were kept in `models/stage5/frcnn_v1/` and the 29 other epoch checkpoints were deleted, **freeing 9.8 GB** (506 MB remain).
 
-Seconds per training iteration (median of 5 after 2 warm-ups; real train photos with augmentation):
+Curves (numbers only, no photos): [`reports/figures/stage_05_training.svg`](figures/stage_05_training.svg), from `data/logs/stage5/frcnn_v1/train_log.csv` (`scripts/plot_training.py`). Selected epochs (val columns are agreement with Grounding DINO):
 
-| Short side (px) | Batch | AMP (fp16) | s / iteration | Photos / s | Epoch of 174 photos | 30 epochs | MPS driver memory |
-|---|---:|---|---:|---:|---:|---:|---:|
-| 800 | 1 | no | 0.38 | 2.64 | 1.1 min | 0.5 h | 4.4 GB |
-| 800 | 2 | no | 0.73 | 2.74 | 1.1 min | 0.5 h | 7.4 GB |
-| 800 | 4 | no | 1.82 | 2.19 | 1.3 min | 0.7 h | 14.9 GB |
-| 800 | 2 | yes | 0.74 | 2.70 | 1.1 min | 0.5 h | 9.7 GB |
-| 1024 | 2 | no | 1.02 | 1.96 | 1.5 min | 0.7 h | 13.7 GB |
+| Epoch | Train loss | Val AP@0.5 | Val AP@0.5:0.95 | Val recall at IoU 0.5 (all scores) | Val precision / recall at score 0.3 |
+|---:|---:|---:|---:|---:|---|
+| 1 | 1.198 | 0.898 | 0.721 | 0.950 | 0.722 / 0.900 |
+| 5 (best.pt) | 0.341 | **0.940** | 0.782 | 0.975 | 0.732 / 0.942 |
+| 10 | 0.264 | 0.937 | 0.793 | 0.964 | 0.816 / 0.919 |
+| 20 | 0.216 | 0.915 | 0.787 | 0.939 | 0.860 / 0.902 |
+| 30 (last) | 0.192 | 0.916 | 0.788 | 0.932 | 0.865 / 0.896 |
 
-Photo decoding and augmentation (4 worker processes) keep up: the training loop never waited for data. Readings: batch 2 is as fast per photo as batch 1 and uses 7.4 GB of the 24 GB; batch 4 is slower per photo and uses 15 GB; fp16 gives no speed-up and more memory, so AMP stays off; a larger resize (1024) costs about 40% more time. Grounding DINO also works at 800 px, which is why 800 is kept.
+## Val agreement with Grounding DINO: fine-tuned model against the Stage 4 baseline
 
-**Measured end to end:** one real epoch over the 174 train photos plus the val agreement evaluation took 94 s of training and about 2 min of wall time in total (the script also loads the model: about 35 s once). **A full run of 30 epochs is estimated at about 1 hour 5 minutes** (about 2.1 min per epoch with the per-epoch val evaluation) on the Mac. **No Colab is needed.** A checkpoint is about 330 MB (model plus optimizer), so 30 epochs need about 10 GB in the ignored `models/stage5/`.
+41 val photos, 2,157 pseudo-label boxes, 6 stores; 95% intervals by resampling whole stores (1,000 times). Predictions under the 1.5% height floor are ignored (best.pt raw: 9 ignored).
 
-That one-epoch run was a timing run (one-epoch schedule, deleted afterwards); its val agreement (AP@0.5 0.90, recall 0.95) only says the pipeline learns quickly. It is not a result and nothing was tuned on it.
+| Agreement, % [95% CI by store] | Baseline COCO, raw | Fine-tuned best.pt (epoch 5), raw | Fine-tuned last epoch (30), raw | Baseline COCO + filters | Fine-tuned best.pt + filters |
+|---|---|---|---|---|---|
+| AP@0.5:0.95 | 68.5 [61.4, 71.8] | 78.2 [72.4, 81.3] | 78.8 [72.2, 81.7] | 68.6 [61.8, 71.9] | 78.2 [72.7, 81.0] |
+| AP@0.5 | 88.6 [79.6, 91.4] | 94.0 [90.6, 95.5] | 91.6 [85.9, 93.3] | 88.4 [81.4, 91.5] | 93.7 [90.7, 95.3] |
+| Recall at IoU 0.5 (all scores) | 94.3 [88.5, 96.1] | 97.5 [96.8, 98.1] | 93.2 [88.8, 94.9] | 92.4 [86.4, 94.9] | 96.6 [94.8, 97.3] |
+| Precision, score >= 0.3 | 69.6 [60.8, 73.1] | 73.2 [62.8, 77.7] | 86.5 [81.4, 91.5] | 76.8 [72.1, 79.6] | 77.2 [71.6, 82.3] |
+| Recall, score >= 0.3 | 87.0 [78.4, 90.0] | 94.2 [91.3, 95.3] | 89.6 [83.1, 91.6] | 86.1 [78.0, 89.6] | 93.8 [90.4, 95.0] |
+| F1, score >= 0.3 | 77.3 [69.0, 80.2] | 82.4 [74.4, 85.3] | 88.0 [82.4, 90.7] | 81.2 [75.3, 84.0] | 84.7 [79.9, 87.6] |
 
-## Overfit-10 sanity check (`python scripts/train_detector.py --overfit`)
+**The `best.pt` column is optimistic**: epoch 5 was chosen because it had the highest val AP@0.5 of 30 noisy checkpoints, so part of its advantage is selection. The last-epoch column (not selected on val) is the fairer comparison with the baseline.
 
-10 seeded random train photos (513 pseudo-label boxes), no augmentation, batch 2, constant learning rate 0.005 after a short warmup, 300 iterations (about 5 minutes):
+Paired bootstrap of the difference by store (a minus b, percentage points; the same resampled stores are used for both models, so the interval measures the difference itself and not the store-to-store variation that both share):
 
-| | Before training | After training |
-|---|---|---|
-| Mean training loss | 2.99 (epoch 1) | **0.06** (epoch 60) |
-| AP@0.5 against these photos' pseudo-labels | 0.039 | **0.990** |
-| AP@0.5:0.95 | 0.014 | 0.948 |
-| Recall at IoU 0.5 | 0.47 | 0.998 |
-| Precision and recall at score 0.3 | 0.08 / 0.47 | 0.998 / 0.998 |
+| Comparison | AP@0.5:0.95 | AP@0.5 | Recall (all scores) | Precision, score >= 0.3 | Recall, score >= 0.3 | F1, score >= 0.3 |
+|---|---|---|---|---|---|---|
+| best.pt raw minus COCO raw | +9.8 [9.3, 11.7] | +5.4 [3.7, 11.3] | +3.3 [1.8, 8.5] | +3.6 [-1.6, 9.8] (zero inside) | +7.2 [5.2, 12.9] | +5.0 [2.4, 8.9] |
+| best.pt + filters minus COCO + filters | +9.6 [9.0, 10.9] | +5.2 [3.5, 9.8] | +4.2 [2.2, 8.4] | +0.4 [-3.4, 4.9] (zero inside) | +7.6 [5.6, 12.3] | +3.5 [1.2, 6.8] |
+| last epoch raw minus COCO raw | +10.3 [9.4, 11.6] | +3.0 [1.7, 6.3] | -1.0 [-1.8, 0.4] (zero inside) | +16.9 [11.4, 26.1] | +2.5 [0.9, 4.9] | +10.7 [7.6, 16.1] |
+| best.pt raw minus last epoch raw | -0.5 [-1.9, 0.8] (zero inside) | +2.4 [1.7, 4.8] | +4.3 [3.1, 8.3] | -13.3 [-19.6, -10.9] | +4.6 [3.6, 8.1] | -5.6 [-8.4, -4.7] |
 
-The model reproduces the labels of the 10 photos almost exactly, so the dataset, the box conversion, the loss and the training loop work. The drawings (`data/review/stage5_overfit/`, ignored; green = pseudo-label, red = prediction) show it also reproduces the pseudo-label **fragment boxes** inside bottles: the model copies what it is shown, errors included, which is the expected consequence of training on unverified pseudo-labels.
+Reading: the fine-tuned model agrees more with Grounding DINO than the COCO model in AP@0.5 and AP@0.5:0.95 for every comparison (interval above zero), and the gap in AP@0.5:0.95 (about 10 points) says its boxes are much closer to Grounding DINO's boxes (it learned their extent). The intervals only reflect which stores were resampled (6 stores, 41 photos): they do not include the uncertainty of the pseudo-labels themselves, of the choice of epoch, or of repeating the training with another seed. Precision at score 0.3 is not a clean comparison, because the score scales of the models differ (see below).
 
-## Proposed hyperparameters (in `configs/stage5.yaml`, to be confirmed before the full run)
+Per store, `best.pt` raw (agreement, %): s01 AP@0.5 95.0; s03 94.5; s06 80.5 (the can-heavy store; baseline 61.9); s11 96.7; s15 93.4; s16 90.5. By number of pseudo-label boxes per photo: 1 to 39 boxes 75.3; 40 to 64 boxes 95.4; 65 to 101 boxes 96.8. The weak spot is still sparse photos and store `s06`, where precision is low (below 50 at score 0.3 in s06), because the model also boxes cans.
 
-| Setting | Value | Reason |
-|---|---|---|
-| Batch size | 2 | same speed per photo as 1, 7.4 GB of 24 GB; more stable gradients than 1 |
-| Optimizer | SGD, momentum 0.9, weight decay 1e-4 | the plan's recipe |
-| Learning rate | 0.005 at batch 2 | inside the plan's 0.005 to 0.01; the common reference (0.02 for 16 photos) scales to 0.0025, so 0.005 is on the bold side and is protected by warmup and clipping |
-| Warmup | 1 epoch (87 steps), linear from 0.1 x lr | the new predictor is random; big early steps would damage the COCO features |
-| Schedule | cosine decay to 0.01 x lr at the last step | smooth end, no manual drops |
-| Gradient clipping | norm 10 | guards against a rare exploding step; the loop also stops if the loss is not finite |
-| Epochs | 30 | inside 20 to 40; about 2,600 steps; about 1 h 5 min |
-| Size / AMP | short side 800 px, fp16 off | see the timing table |
-| Seed | 0; the shuffle and augmentation are reseeded each epoch, so a resumed run continues the same sequence | |
-| Checkpoints | every epoch (`models/stage5/frcnn_v1/epoch_XX.pt`), plus `best.pt` by val AP@0.5 | resume with `--resume` |
-| Log | `data/logs/stage5/frcnn_v1/train_log.csv`: loss, learning rate, val AP, AP@0.5, recall, precision, recall@0.3, F1 per epoch | plotted in the final report |
+## The decline after epoch 5 (mild overfitting?)
 
-## Pending (not part of this stop)
+What the log shows: val AP@0.5 is 0.898 at epoch 1, 0.940 at epoch 5 (the maximum), then drifts to a plateau (epochs 11 to 30: mean 0.918, standard deviation 0.004, range 0.908 to 0.924), while the training loss keeps falling (0.34 at epoch 5, 0.19 at epoch 30). Reading it carefully:
 
-- **Real Label Studio export check: pending**, by decision of the coordinator: the owner-annotation path of `scripts/export_coco.py` will first be tested with a real export when the owner corrects the demo set. Until then it is covered only by tests on synthetic exports.
-- Full run, evaluation with the Stage 4 script, the paired bootstrap of the difference by store, the loss and agreement plot, and the error analysis.
+1. **The decline is small compared with the noise that matters.** From the early mean (epochs 2 to 10: 0.929) to the plateau (0.918) it is about 1.1 points. The store-bootstrap interval of a single model's AP@0.5 is about +-4 points (and 6 stores is very few). Epoch-to-epoch jitter on the plateau is about 0.4 points. The paired comparison of epoch 5 and epoch 30 does exclude zero for AP@0.5 (+2.4 [1.7, 4.8]), but **epoch 5 was picked as the best of 30 noisy values**, which inflates that gap; the interval cannot account for the selection.
+2. **It depends on the metric.** AP@0.5:0.95, the box-extent metric, does not decline (epochs 2 to 10 mean 0.773, epochs 11 to 30 mean 0.786; epoch 5 against epoch 30: -0.5 points, zero inside the interval). What shrinks is the **tail of low-confidence detections**: raw detections above score 0.05 fall from 4,160 (epoch 5) to 2,609 (epoch 30), recall counting all scores falls from 97.5% to 93.2%, while precision at score 0.3 rises from 73% to 86.5% and F1 at 0.3 rises from 82% to 88%. The model becomes sharper and more confident, which AP@0.5 (and `best.pt`, chosen by it) reads as a loss and precision/F1 at a fixed score reads as a gain.
+3. **So the evidence fits two explanations that this data cannot separate**: classic overfitting to the train pseudo-labels (the model memorises their errors; the overfit-10 check showed it can), or only a shift in score calibration as the loss falls. Training loss falling while the val AP@0.5 stays flat or slightly lower is the usual overfitting pattern, but the size of the effect is small and mixed across metrics.
+
+**Proposal for future runs: a shorter schedule of 10 to 12 epochs**, with warmup 1 epoch and the cosine decay compressed to the new length (not the old schedule stopped early, which would end at a high learning rate). That is about 25 minutes on this Mac. Use the **last epoch** (or a choice by AP@0.5:0.95, which is stable across epochs) rather than the maximum of a noisy AP@0.5 on val, so that the val number is not inflated by selection. If more val stores become available, a comparison with the 30-epoch run on them would settle whether it is overfitting.
+
+## Error analysis on val (fine-tuned best.pt, raw output, score >= 0.3, IoU >= 0.5)
+
+(`python scripts/stage5_error_analysis.py`; drawings in the ignored `data/review/stage5_errors/`: green = agrees, red = extra prediction, blue = missed pseudo-label, the letter is the cause.)
+
+Matched 2,032 boxes; **745 extra predictions** and **125 missed pseudo-labels**. The causes are automatic proxies, checked by eye on the drawings, not ground truth:
+
+| Cause (proxy) | Extra predictions | Missed pseudo-labels |
+|---|---:|---:|
+| Can: the box lies on a can found by Grounding DINO with the prompt "soda can." (a lower bound: it finds only part of the cans) | 43 | 7 |
+| Fragment: a small box (under 60% of the area) at least 80% inside a larger box | 296 | 20 |
+| Partial overlap: overlaps a box on the other side with IoU 0.1 to 0.5 (occluded or overlapping bottles, or a different box extent) | 103 | 61 |
+| Small bottle: shorter than 3% of the image height | 13 | 4 |
+| Other: nothing near it on the other side | 290 | 33 |
+
+What stands out:
+- **The model imitates pseudo-label errors.** 288 of the 2,157 val pseudo-labels (13%) look like label errors by these proxies (166 fragments inside a larger box, which the labeling guide's 40% rule would not label, and 122 boxes on cans, a lower bound). The model **matched 261 of them** (146 fragments, 115 cans) and refused only 27. This is the Stage 5 expectation from the plan note, now measured. The fragment proxy can also hit small genuine bottles behind a larger one, so treat the 13% as an upper-bound estimate for fragments and a lower bound for cans.
+- **Cans:** the largest single photo is a shelf of energy-drink cans: 121 of the 745 extras (16%) are in one photo, where the pseudo-labels have only 15 boxes. Most of its boxes fall under "other" because the can proxy finds only a part of the cans. Together with the sparse-photo and `s06` results, cans are the main reason precision is low in some photos.
+- **Fragments:** the fine-tuned model also adds fragment boxes that are not in the pseudo-labels (296 extras), for example small boxes on caps of back-row bottles. The Stage 2 filters remove many of them (precision at 0.3 rises from 73.2 to 77.2 with the filters at the same recall).
+- **Partial overlap (occlusion):** about 100 extras and 60 misses are one object seen with a different extent, in the drawings mostly bottles partly covered by their neighbours, and tight against loose boxes. Automatic analysis cannot separate occlusion from box extent; this is a joint cause.
+- **Small bottles are not the problem:** 13 extras and 4 misses (under 3% of the image height).
+- **Pseudo-label errors that the model refused:** 27 (20 fragments, 7 cans), i.e. cases where the model disagrees with an error.
+
+## Limits
+
+- All numbers are agreement with Grounding DINO, on 41 photos from 6 stores. The bootstrap covers store sampling only.
+- `best.pt` is selected on val AP@0.5; its val number is optimistic. No test data was used.
+- The cause proxies are heuristics; the can proxy is a lower bound.
+- One training run (seed 0): no estimate of run-to-run variation.
+- **Real Label Studio export check: pending**, by decision of the coordinator; it will first be exercised when the owner corrects the demo set. Until then the owner-annotation path of `scripts/export_coco.py` is covered only by tests on synthetic exports.
 
 ## How to verify (inside `soda-poc`)
 
 ```bash
 python -m pytest -q
-python scripts/train_timing.py
-python scripts/train_detector.py --overfit
+python scripts/predict_val.py --model frcnn --checkpoint models/stage5/frcnn_v1/best.pt --name frcnn_ft_best_val
+python scripts/predict_val.py --model frcnn --checkpoint models/stage5/frcnn_v1/epoch_30.pt --name frcnn_ft_last_val
+python scripts/evaluate_detections.py      # tables and the paired differences above
+python scripts/stage5_error_analysis.py
+python scripts/plot_training.py
 git status --short                          # nothing under data/ or models/
 ```
