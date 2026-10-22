@@ -31,12 +31,14 @@ Learning POC: detect soda bottles in store shelf photos and identify which ones 
 ## Data
 
 - **Never commit photos or labeling files.** Everything under `data/` is gitignored except `.gitkeep` files and `data/splits/*.txt` (lists of anonymous photo ids only, never file names). That includes the ~300 shelf photos in `data/raw/`, pre-labels, Label Studio exports, COCO annotations, crops, masks and catalog images. `models/` (checkpoints and downloaded weights) is also ignored.
+- **Never run `docker compose down -v`** (or delete `volumes/`): all Label Studio data (annotations, product choices, lead times) lives only in the Docker volume `volumes/label-studio`. Backup routine: a JSON export (Export, JSON) after each labeling session; `scripts/export_coco.py --ls-export FILE` copies it with a UTC timestamp to `data/annotations/ls_backups/`.
 - At the end of every task, run `git status --short` and make sure no image or annotation file shows up as untracked or modified. If the `.gitignore` is missing something, fix it and tell me.
 - `data/raw/` is never modified. Everything derived goes into other folders.
 - The detector has a single generic `bottle` class for soda bottles, regardless of brand. Brand and variant are resolved later with embeddings, never in the detector labels.
 - **Cans are out of scope**: there is no `can` class and cans are not labeled.
 - **Target products (10 ids):** `coca_classic`, `coca_classic_returnable`, `coca_zero`, `coca_zero_returnable`, `coca_light`, `sprite`, `sprite_returnable`, `sprite_zero`, `pepsi`, `pepsi_returnable`. Details in `docs/catalog_variants.md`. Size and material (PET or glass) are secondary catalog metadata, not hard success criteria.
 - **Any bottle that is not one of these 10 products ends up as `unknown`** (other brands, water, juice). The detector still labels all of them as `bottle`; the decision is made after the embeddings (see "Unknown handling" in `docs/PLAN.md`).
+- **Labels are Grounding DINO pseudo-labels (owner decision).** Train, val and test use the pre-labels as they are (`label_source: prelabel_unverified`); an owner annotation in a Label Studio JSON export wins (`owner_corrected`). Every metric on val or test measures **agreement with Grounding DINO, not accuracy**, and every report must say so each time such a number is shown. Only the future demo set (owner-corrected) gets accuracy numbers.
 - The test split is not used to tune anything before stage 8.
 - Photos are split by store or shelf, never by individual photo.
 - **File names are never committed.** Photo file names contain uploader names and store names and addresses. From Stage 1 on, each store gets a code (`s01`, `s02`, ...; assigned once, in sorted store id order; stores added later get the next free code; existing codes are never renumbered) and each photo an anonymous id `<store code>_<first 8 hex of sha256 of the file name>`, e.g. `s07_3fa2c9d1`. Real store ids are not committed either. Two mappings live in `data/` (gitignored): store code to store id, and photo id to file name. Only store codes and photo ids go into `data/splits/*.txt` and anything else committed (reports, configs, docs, test fixtures). Do not rewrite git history.
@@ -74,6 +76,13 @@ python scripts/prelabel_compare.py                # side-by-side pre-labeler com
 python scripts/prelabel_run.py                    # frozen Grounding DINO on all 253 non-excluded photos -> data/prelabels/ (gitignored)
 python scripts/build_ls_tasks.py                 # relative symlinks named by photo id + data/labelstudio/tasks.json (gitignored)
 python scripts/check_ls_conversion.py            # round trip of every converted box; draws 10 photos; lists the 3 photos for the alignment check
+```
+
+Stage 3 (inside `soda-poc`; photo ids only, outputs in the ignored `data/annotations/`):
+
+```bash
+python scripts/export_coco.py [--ls-export PATH]   # COCO per split from the pre-labels (+ owner annotations from a Label Studio JSON export) -> data/annotations/coco/
+python scripts/check_coco.py                       # Stage 3 gate: sanity checks and 20 drawn photos in data/review/coco_check/
 ```
 
 Pre-commit leak check (the owner runs this once per clone; the assistant never installs it):
