@@ -59,7 +59,7 @@ The offline path produces two things the online path uses: the detector weights 
 | Embeddings | DINOv2 | One vector per crop to compare against the catalog | Apache 2.0 |
 | Vector search | PostgreSQL + pgvector | Top-K by cosine similarity | PostgreSQL License |
 | OCR | PaddleOCR | Reads "Zero", "sin azúcar", "1,5 L" on the packaging | Apache 2.0 |
-| Metrics | `pycocotools` or `torchmetrics` | mAP, recall, precision | BSD / Apache 2.0 |
+| Metrics | `pycocotools` | mAP, recall, precision | BSD-2-Clause |
 | Error analysis | FiftyOne (optional) | Inspect false positives and negatives on the photos | Apache 2.0 |
 | API | FastAPI | Photo to inventory endpoint | MIT |
 
@@ -150,7 +150,7 @@ There are ten stages in order, and each one ends with a validation gate. Do not 
 5. **Label Studio:** the `RectangleLabels` `bottle` config plus the per-photo product `Choices` field (stage 3, item 1), in `configs/label_studio/bottle_project.xml`. Photos are served through relative symlinks named by photo id (no file names in Label Studio, tasks or committed files). Pre-labels are converted to Label Studio `predictions` with tested functions: Label Studio uses coordinates as **percentages** of image width and height (0 to 100), not pixels. Tasks for all non-excluded photos (train, val and test) are imported through the UI.
 6. **Pre-label all non-excluded photos** (253) with the frozen settings. No decision uses val or test results.
 
-**Gate:** the converted boxes round-trip in the tests and line up on 3 photos (one portrait, one landscape, one of the largest) in the Label Studio UI; tasks with predictions for all photos import correctly; the final minimum-height rule is decided; no file name appears in any task, config, report or committed file. Pre-label quality (precision and recall at IoU 0.5 against the corrected labels) is measured at the end of stage 3 and is **biased toward the pre-labeler**: annotators tend to accept the boxes they are shown, so it is a lower bound on the real error, not a clean estimate.
+**Gate:** the converted boxes round-trip in the tests and line up on 3 photos (one portrait, one landscape, one of the largest) in the Label Studio UI; tasks with predictions for all photos import correctly; the final minimum-height rule is decided; no file name appears in any task, config, report or committed file. Pre-label quality (precision and recall at IoU 0.5 against the corrected labels) is measured **on the demo set, once the owner's corrections exist** (train, val and test are not corrected in this POC), and is **biased toward the pre-labeler**: annotators tend to accept the boxes they are shown, so it is a lower bound on the real error, not a clean estimate.
 
 ### Stage 3: labels, review and export
 
@@ -174,7 +174,7 @@ There are ten stages in order, and each one ends with a validation gate. Do not 
 
 1. Evaluate on val the torchvision Faster R-CNN with COCO weights **without training**, using its `bottle` class, which already exists in COCO (the code from stage 2). Val labels are Grounding DINO pseudo-labels, so the numbers are **agreement with Grounding DINO, not accuracy**, and every table says so.
 2. The Grounding DINO zero-shot baseline is **trivial under these labels** (the model is compared with itself), so it is skipped, or reported only as a sanity check of the evaluation pipeline (it should reach about 100% agreement, apart from the height floor and the filters).
-3. Measure mAP@0.5, mAP@0.5:0.95 and recall with `pycocotools` or `torchmetrics`. **Predictions shorter than 1.5% of the image height are ignored** (neither matched nor counted as false positives), because the ground truth has no boxes that small; the number ignored is reported.
+3. Measure mAP@0.5, mAP@0.5:0.95 and recall with `pycocotools` (the COCO reference implementation, pinned; `src/evaluation/`, `scripts/evaluate_detections.py`), with `maxDets` 300 because dense shelves hold up to about 125 boxes. Report two Faster R-CNN variants: the raw output and the output with the stage 2 filters, at a low score threshold (0.05) for mAP and at the stage 2 operating point (0.3) for precision, recall and F1. **Predictions shorter than 1.5% of the image height are ignored** (neither matched nor counted as false positives), because the ground truth has no boxes that small; the number ignored is reported.
 
 4. Report metrics with a bootstrap confidence interval resampled by store (whole stores are resampled, not photos), because val and test hold only a few stores each; the interval tells us how much a difference between two runs means.
 
@@ -229,7 +229,7 @@ Any bottle that is not one of the 10 target products must end up as `unknown`. T
     - margin between the best product and the second best *different* product below a threshold → `review`, or `unknown` if the similarity is also low;
     - top-K neighbors disagree on the product (k-NN vote below a minimum share) → `review` or `unknown`;
     - OCR contradicts the top-1 (for example reads "PEPSI" when top-1 is a Coca-Cola product) → `review`.
-4. **Calibration:** all thresholds are tuned on val only, possibly per product if one product behaves differently. Test is used once, in stage 8.
+4. **Calibration:** all thresholds are tuned on val only, possibly per product if one product behaves differently. Val has no product labels unless the owner labels some, so there are two options, **both kept open until stage 6 (final decision there)**: (a) the owner labels a small val crop sample (about 200 crops, including unknowns), which keeps the demo set whole for the final evaluation (leaning option); (b) the demo set is split into a calibration part and an evaluation part. Test is used once, in stage 8.
 5. **Metrics** (also in the metrics table): accuracy on known products; unknown rejection rate (share of truly unknown crops classified as `unknown` or `review`); false known rate (share of truly unknown crops assigned to one of the 8 products with `automatic` status). The false known rate is the most important number and should stay below 5%.
 
 ### Stage 7: OCR as evidence
@@ -250,7 +250,7 @@ Any bottle that is not one of the 10 target products must end up as `unknown`. T
 
 1. Gather the signals per detection: detector score, top-1 similarity, margin between the top-1 product and the best different product, and whether OCR agrees or contradicts.
 2. Combine them into a simple score: a weighted sum or a logistic regression trained on val.
-3. Calibrate on val crops that carry manual product labels (a sample the owner labels for this purpose; Stage 6 decides how large) the thresholds for the three outcomes: automatic, human review and unknown, using the rejection rules from "Unknown handling" in stage 6. Cosine similarity is not a probability: 0.94 does not mean 94% certainty. Val must contain labeled `unknown` crops, otherwise this step cannot be done.
+3. Calibrate the thresholds on val crops that carry manual product labels (option (a): a sample of about 200 crops the owner labels for this purpose, including unknowns; option (b): a calibration part of the demo set; decided in stage 6, see "Unknown handling") for the three outcomes: automatic, human review and unknown, using the rejection rules from "Unknown handling" in stage 6. Cosine similarity is not a probability: 0.94 does not mean 94% certainty. Val must contain labeled `unknown` crops, otherwise this step cannot be done.
 4. Evaluate **only once** on the demo set, with the thresholds already fixed (it is never used to tune or calibrate anything; demo photos used for the reference catalog are excluded). This is the only accuracy number. Test is also used once, but it has no product labels, so only the detection agreement and the automatic / review / unknown percentages are reported for it, as behavior of the pipeline, not accuracy.
 
 5. Report metrics with a bootstrap confidence interval resampled by store (whole stores are resampled, not photos), because val and test hold only a few stores each; the interval tells us how much a difference between two runs means.

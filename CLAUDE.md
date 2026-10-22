@@ -85,6 +85,15 @@ python scripts/export_coco.py [--ls-export PATH]   # COCO per split from the pre
 python scripts/check_coco.py                       # Stage 3 gate: sanity checks and 20 drawn photos in data/review/coco_check/
 ```
 
+Stage 4 (inside `soda-poc`; val only, test is not touched; every number is agreement with Grounding DINO, not accuracy):
+
+```bash
+python scripts/predict_val.py --model frcnn      # Faster R-CNN COCO on val (raw and filtered) -> data/predictions/stage4/ (gitignored)
+python scripts/predict_val.py --model dino       # frozen Grounding DINO on val: pipeline sanity check, not a baseline
+python scripts/evaluate_detections.py            # AP, recall, precision with bootstrap CI by store, per store and per density
+python scripts/stage4_error_look.py              # draws disagreements with the pseudo-labels in data/review/stage4_errors/
+```
+
 Pre-commit leak check (the owner runs this once per clone; the assistant never installs it):
 
 ```bash
