@@ -23,20 +23,7 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from src.data.images import load_image  # noqa: E402
 from src.data.paths import check_output_dir  # noqa: E402
-from src.evaluation.detection import ignore_below_floor  # noqa: E402
-from src.prelabel.filters import box_iou  # noqa: E402
-
-
-def match(gt: np.ndarray, boxes: np.ndarray, scores: np.ndarray, iou_thr: float):
-    """Greedy matching by descending score (same rule as COCOeval). Returns (matched gt mask, matched pred mask, iou matrix)."""
-    iou = box_iou(boxes, gt) if len(boxes) and len(gt) else np.zeros((len(boxes), len(gt)))
-    gt_hit, pred_hit = np.zeros(len(gt), bool), np.zeros(len(boxes), bool)
-    for i in np.argsort(-scores):
-        free = np.where(~gt_hit & (iou[i] >= iou_thr))[0] if len(gt) else []
-        if len(free):
-            j = free[np.argmax(iou[i, free])]
-            gt_hit[j], pred_hit[i] = True, True
-    return gt_hit, pred_hit, iou
+from src.evaluation.detection import greedy_match as match, ignore_below_floor  # noqa: E402
 
 
 def main() -> int:

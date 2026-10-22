@@ -21,7 +21,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
 from src.data.paths import check_output_dir  # noqa: E402
-from src.evaluation.detection import (bootstrap_by_store, gt_counts, ignore_below_floor, operating_point,  # noqa: E402
+from src.evaluation.detection import (bootstrap_by_store, difference_metric, gt_counts, ignore_below_floor, operating_point,  # noqa: E402
                                       per_photo_results, summarize)
 
 NOTE = "agreement with Grounding DINO pseudo-labels, NOT accuracy"
@@ -52,8 +52,11 @@ def main() -> int:
     print(f"Ground truth: {cfg['gt']} ({len(sizes)} photos, {len(gt['annotations'])} boxes, stores {sorted(set(store_of.values()))})")
     print(f"ALL NUMBERS BELOW ARE {NOTE.upper()}.\n")
 
-    all_results = {}
+    all_results, metric_fns = {}, {}
     for run in cfg["runs"]:
+        if not (pred_dir / run["file"]).exists():
+            print(f"### {run['label']}: SKIPPED, {run['file']} not found (run scripts/predict_val.py first)\n")
+            continue
         raw = json.loads((pred_dir / run["file"]).read_text())["variants"][run["variant"]]
         preds = {pid: (np.array(raw[pid]["boxes"], float), np.array(raw[pid]["scores"], float)) for pid in sizes}
         preds, n_floor = ignore_below_floor(preds, sizes, floor)
@@ -68,6 +71,7 @@ def main() -> int:
             op = operating_point([res_op[p] for p in photos])
             return {**m, "precision": op["precision"], "recall": op["recall"], "f1": op["f1"]}
 
+        metric_fns[run["name"]] = metrics
         photos = sorted(sizes)
         point = metrics(photos)
         check = max(abs(point["AP"] - reference[0]), abs(point["AP50"] - reference[1]))
@@ -91,7 +95,7 @@ def main() -> int:
         all_results[run["name"]] = {"label": run["label"], "baseline": run["baseline"], "ignored_below_floor": n_floor,
                                     "kept": n_total, "point": point, "ci": ci, "counts": op_counts, "check_vs_cocoeval": check,
                                     "per_store": stores, "per_density": bin_rows}
-        if run["baseline"]:
+        if run.get("breakdown", run["baseline"]):
             print(f"Per store ({NOTE}):\n| Store | Photos | GT boxes | AP@0.5 | Precision | Recall |\n|---|---:|---:|---:|---:|---:|")
             for s, v in stores.items():
                 print(f"| {s} | {v['photos']} | {v['gt_boxes']} | {fmt(v['AP50'])} | {fmt(v['precision'])} | {fmt(v['recall'])} |")
@@ -99,7 +103,24 @@ def main() -> int:
             for v in bin_rows:
                 print(f"| {v['bin']} | {v['photos']} | {fmt(v['AP50'])} | {fmt(v['precision'])} | {fmt(v['recall'])} |")
             print()
-    (pred_dir / "results.json").write_text(json.dumps({"note": NOTE, "runs": all_results}, indent=1))
+    paired_results = []
+    for pair in cfg.get("paired", []):
+        if pair["a"] not in metric_fns or pair["b"] not in metric_fns:
+            continue
+        diff = difference_metric(metric_fns[pair["a"]], metric_fns[pair["b"]])
+        point = diff(sorted(sizes))
+        ci = bootstrap_by_store(store_of, diff, cfg["bootstrap"]["n"], cfg["seed"], cfg["bootstrap"]["level"])
+        names = {r["name"]: r["label"] for r in cfg["runs"]}
+        print(f"### Paired difference by store: {pair['a']} minus {pair['b']}  ({NOTE})")
+        print(f"a = {names[pair['a']]}; b = {names[pair['b']]}; the same resampled stores are used for both models")
+        print("| Metric (percentage points) | Difference a - b [95% CI by store] | Interval excludes zero |\n|---|---|---|")
+        for key, name in (("AP", "AP@0.5:0.95"), ("AP50", "AP@0.5"), ("recall50", "Recall at IoU 0.5 (all scores)"),
+                          ("precision", "Precision, score >= 0.3"), ("recall", "Recall, score >= 0.3"), ("f1", "F1, score >= 0.3")):
+            lo, hi = ci[key]
+            print(f"| {name} | {fmt(point[key], ci[key])} | {'yes' if lo > 0 or hi < 0 else 'no'} |")
+        print()
+        paired_results.append({"a": pair["a"], "b": pair["b"], "point": point, "ci": ci})
+    (pred_dir / "results.json").write_text(json.dumps({"note": NOTE, "runs": all_results, "paired": paired_results}, indent=1))
     print(f"results written to {(pred_dir / 'results.json').relative_to(REPO_ROOT)} (gitignored)")
     return 0
 

@@ -26,6 +26,7 @@ sys.path.insert(0, str(REPO_ROOT))
 from src.common.device import get_device  # noqa: E402
 from src.data.images import load_image  # noqa: E402
 from src.data.paths import check_output_dir  # noqa: E402
+from src.detection.model import build_model  # noqa: E402
 from src.prelabel import frcnn, grounding_dino  # noqa: E402
 from src.prelabel.filters import filter_boxes, wedge_mask  # noqa: E402
 
@@ -34,6 +35,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default="configs/stage4.yaml")
     parser.add_argument("--model", choices=["frcnn", "dino"], required=True)
+    parser.add_argument("--checkpoint", help="frcnn only: a fine-tuned checkpoint of Stage 5 (best.pt or epoch_XX.pt) instead of the COCO weights")
+    parser.add_argument("--name", help="output file name stem (default: <model>_val); needed with --checkpoint")
     args = parser.parse_args()
     cfg = yaml.safe_load((REPO_ROOT / args.config).read_text())
     pcfg = yaml.safe_load((REPO_ROOT / cfg["prelabel_config"]).read_text())
@@ -49,7 +52,17 @@ def main() -> int:
     fcfg, wedge = pcfg["filters"], pcfg["filters"]["wedge"]
     wedge_args = {k: wedge[k] for k in ("value", "tolerance", "min_component_fraction")}
 
-    if args.model == "frcnn":
+    if args.model == "frcnn" and args.checkpoint:
+        scfg = yaml.safe_load((REPO_ROOT / "configs/stage5.yaml").read_text())
+        model = build_model({**scfg["model"], "box_score_thresh": cfg["frcnn_score_threshold_for_map"]}, REPO_ROOT)
+        state = torch.load(REPO_ROOT / args.checkpoint, map_location="cpu", weights_only=True)
+        model.load_state_dict(state["model"])
+        model.eval().to(device)
+        target_id = 1  # the fine-tuned model has 2 classes: 0 = background, 1 = bottle
+        print(f"checkpoint {args.checkpoint} (epoch {state.get('epoch', '?')})")
+        detect = lambda image: frcnn.detect(model, target_id, image, device)  # noqa: E731
+        variants = ["raw", "filtered"]
+    elif args.model == "frcnn":
         model, target_id = frcnn.load_model({**pcfg["frcnn"], "box_score_thresh": cfg["frcnn_score_threshold_for_map"]}, device, REPO_ROOT)
         detect = lambda image: frcnn.detect(model, target_id, image, device)  # noqa: E731
         variants = ["raw", "filtered"]
@@ -69,7 +82,7 @@ def main() -> int:
         filtered = filter_boxes(boxes, scores, image.size, wedge_mask(np.asarray(image), **wedge_args), fcfg)
         key = "filtered" if args.model == "frcnn" else "frozen"
         result[key][pid] = {"boxes": filtered[0].round(2).tolist(), "scores": filtered[1].round(4).tolist()}
-    path = out_dir / f"{args.model}_val.json"
+    path = out_dir / f"{args.name or args.model + '_val'}.json"
     path.write_text(json.dumps({"model": args.model, "split": cfg["split"], "variants": result}))
     print(f"{args.model}: {len(ids)} {cfg['split']} photos on {device} in {time.perf_counter() - start:.0f} s -> {path.relative_to(REPO_ROOT)} (gitignored)")
     for v in variants:

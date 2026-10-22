@@ -53,3 +53,14 @@ timing:
     - {min_size: 800,  batch_size: 4, amp: false}
     - {min_size: 800,  batch_size: 2, amp: true}
     - {min_size: 1024, batch_size: 2, amp: false}
+error_analysis:                               # scripts/stage5_error_analysis.py (val only)
+  predictions: data/predictions/stage4/frcnn_ft_best_val.json   # written by scripts/predict_val.py --checkpoint
+  variant: raw                                # the raw model output shows what it learned (the Stage 2 filters would hide fragments)
+  score_threshold: 0.30
+  can_prompt: "soda can."                     # Grounding DINO proxy that finds cans (out of scope). "can." finds almost none; at 0.3 "soda can." fires on can shelves and not on bottle shelves, but finds only a part of the cans: the can counts are a LOWER BOUND
+  can_box_threshold: 0.30
+  cache: data/predictions/stage5/cans_val.json   # gitignored
+  output_dir: data/review/stage5_errors       # gitignored
+  n_photos: 6                                 # seeded random val photos, plus `include`
+  include: [s06_b8c050ce, s03_05caed03, s15_5bcb84b5]   # can-only photo, can shelf, dense bottle shelf (as in Stage 4)
+  max_side_px: 1100

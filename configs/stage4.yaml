@@ -13,7 +13,17 @@ bootstrap: {n: 1000, level: 0.95}            # resampling of WHOLE STORES
 runs:                                        # name, prediction file and variant produced by scripts/predict_val.py
   - {name: frcnn_raw,      file: frcnn_val.json, variant: raw,      baseline: true,  operating_threshold: 0.30, label: "Faster R-CNN COCO, raw output"}
   - {name: frcnn_filtered, file: frcnn_val.json, variant: filtered, baseline: true,  operating_threshold: 0.30, label: "Faster R-CNN COCO + Stage 2 filters"}
+  # Stage 5: the fine-tuned detector (best.pt = epoch with the best val AP@0.5; epoch_30.pt = last epoch, not selected on val)
+  - {name: ft_best_raw,      file: frcnn_ft_best_val.json, variant: raw,      baseline: false, breakdown: true, operating_threshold: 0.30, label: "Fine-tuned Faster R-CNN, best.pt, raw output"}
+  - {name: ft_best_filtered, file: frcnn_ft_best_val.json, variant: filtered, baseline: false, breakdown: true, operating_threshold: 0.30, label: "Fine-tuned Faster R-CNN, best.pt, + Stage 2 filters"}
+  - {name: ft_last_raw,      file: frcnn_ft_last_val.json, variant: raw,      baseline: false, breakdown: true, operating_threshold: 0.30, label: "Fine-tuned Faster R-CNN, last epoch (30), raw output"}
   - {name: dino_check,     file: dino_val.json,  variant: frozen,   baseline: false, operating_threshold: 0.0,  label: "Grounding DINO frozen (pipeline sanity check, NOT a baseline)"}
+# Paired comparisons: a - b with the SAME resampled stores for both (interval of the difference by store).
+paired:
+  - {a: ft_best_raw,      b: frcnn_raw}
+  - {a: ft_best_filtered, b: frcnn_filtered}
+  - {a: ft_last_raw,      b: frcnn_raw}          # last epoch was not selected on val: the fairer comparison
+  - {a: ft_best_raw,      b: ft_last_raw}        # is the epoch choice distinguishable from noise?
 density_bins: 3                              # photos split into this many bins by number of pseudo-label boxes
 error_look:
   output_dir: data/review/stage4_errors      # gitignored
