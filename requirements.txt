@@ -31,3 +31,5 @@ mdurl==0.1.2
 shellingham==1.5.4
 truststore==0.10.5
 annotated-doc==0.0.5
+# Stage 4 evaluation (COCO reference implementation of mAP)
+pycocotools==2.0.11
