@@ -82,9 +82,13 @@ def main() -> int:
         paths = git("ls-files", "-c", "-o", "--exclude-standard", "-z").decode().split("\0")
         paths = [p for p in paths if p] + list(args.extra)
         scanned = 0
+        extra = set(args.extra)
         for path in paths:
             full = REPO_ROOT / path
             if not full.is_file():
+                if path in extra:  # an explicitly requested file that is missing must never pass silently
+                    print(f"{path}: requested with --extra but not found")
+                    problems += 1
                 continue
             data = full.read_bytes()
             scanned += 1
@@ -95,4 +99,11 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # Never exit silently: an unexpected error prints a summary line too and fails (exit code 2).
+    try:
+        code = main()
+    except Exception as error:  # noqa: BLE001
+        print(f"leak check: ERROR, the check did not complete ({type(error).__name__}: {error})")
+        code = 2
+    sys.stdout.flush()
+    sys.exit(code)
