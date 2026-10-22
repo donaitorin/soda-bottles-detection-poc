@@ -8,7 +8,7 @@ Learning POC: detect soda bottles in store shelf photos and identify which ones 
 - Before writing code for a stage, propose the tasks and wait for my approval.
 - When a stage is done, write a summary in `reports/stage_XX.md` (what was done, results, how I can verify the gate, problems found) and wait for my confirmation.
 - I am learning computer vision. When you implement something non-obvious (coordinate conversions, detector settings, thresholds), add a short comment in the code and explain it in the summary.
-- Every time we stop and wait for approval, write a handoff file at `.handoff/latest.md` (overwritten each time, gitignored, never committed) so the user can pass it to the project coordinator, who has no access to the repo. Contents in order: status; suggested commits (in order, for each one the files to stage and the commit message; every file belongs to exactly one commit, so I never stage part of a file); verification commands with trimmed output, including `git status --short` (and confirm that no image, annotation file or file under `data/` other than `.gitkeep` and splits shows up); diffs against HEAD (the uncommitted working tree) of changed docs/configs/CLAUDE.md/.gitignore/environment.yml/requirements.txt/docker-compose.yml (code files: diff if under ~200 lines, else a summary and path); numbered decisions or questions. Handoffs never carry real identifiers (store ids, store names or addresses, uploader names, photo file names): diffs against HEAD also show deleted lines, so redact them (replace each match by `<redacted-...>`) and run `python scripts/check_no_leaks.py --extra .handoff/latest.md` before telling the owner the handoff is ready; it must report 0 problems. Keep the chat reply short and point to the file.
+- Every time we stop and wait for approval, write a handoff file at `.handoff/latest.md` (overwritten each time, gitignored, never committed) so the user can pass it to the project coordinator, who has no access to the repo. Contents in order: status; suggested commits (in order, for each one the files to stage and the commit message; every file belongs to exactly one commit, so I never stage part of a file); verification commands with trimmed output, including `git status --short` (and confirm that no image, annotation file or file under `data/` other than `.gitkeep` and splits shows up); diffs against HEAD (the uncommitted working tree) of changed docs/configs/CLAUDE.md/.gitignore/environment.yml/requirements.txt/docker-compose.yml (code files: diff if under ~200 lines, else a summary and path); numbered decisions or questions. Handoffs never carry real identifiers (store ids, store names or addresses, uploader names, photo file names): diffs against HEAD also show deleted lines, so redact them (replace each match by `<redacted-...>`) and run `python scripts/check_no_leaks.py --extra .handoff/latest.md` before telling the owner the handoff is ready; it must report 0 problems. This check is the LAST step before telling the owner the handoff is ready, and its output (the summary line) is appended at the end of the handoff. The script always prints a summary line and exits non-zero on any problem, on a missing `--extra` file or on an internal error; when running it through `conda run`, do not read only the last line of the output (`conda run` adds a trailing blank line). Keep the chat reply short and point to the file.
 - **Never run `git add`, `git commit` or `git push`.** I review every diff in VS Code and commit manually. Read-only git commands (status, diff, log, ls-files, check-ignore) are fine. Leave all changes in the working tree, unstaged.
 
 ## Technical constraints
@@ -92,6 +92,15 @@ python scripts/predict_val.py --model frcnn      # Faster R-CNN COCO on val (raw
 python scripts/predict_val.py --model dino       # frozen Grounding DINO on val: pipeline sanity check, not a baseline
 python scripts/evaluate_detections.py            # AP, recall, precision with bootstrap CI by store, per store and per density
 python scripts/stage4_error_look.py              # draws disagreements with the pseudo-labels in data/review/stage4_errors/
+```
+
+Stage 5 (inside `soda-poc`; trains on the Grounding DINO pseudo-labels, so every val number is agreement, not accuracy):
+
+```bash
+python scripts/train_timing.py                   # seconds per iteration, memory and epoch time on the real device (before any long run)
+python scripts/train_detector.py --overfit       # sanity check: overfit 10 train photos
+caffeinate -i conda run --no-capture-output -n soda-poc python scripts/train_detector.py            # full run (checkpoint every epoch in models/stage5/, log in data/logs/stage5/)
+caffeinate -i conda run --no-capture-output -n soda-poc python scripts/train_detector.py --resume   # continue after an interruption
 ```
 
 Pre-commit leak check (the owner runs this once per clone; the assistant never installs it):
