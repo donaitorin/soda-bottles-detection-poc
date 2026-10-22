@@ -18,7 +18,7 @@ import numpy as np
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 
-from src.prelabel.filters import below_height_floor
+from src.prelabel.filters import below_height_floor, box_iou
 
 REC_THRS = np.linspace(0.0, 1.0, 101)  # COCO's 101 recall points
 
@@ -140,3 +140,26 @@ def bootstrap_by_store(photo_store: dict, metric_fn, n: int, seed: int, level: f
         lo, hi = np.percentile(vals, [(1 - level) / 2 * 100, (1 + level) / 2 * 100]) if len(vals) else (float("nan"),) * 2
         out[key] = (float(lo), float(hi))
     return out
+
+
+def greedy_match(gt: np.ndarray, boxes: np.ndarray, scores: np.ndarray, iou_thr: float):
+    """Greedy matching by descending score (the COCOeval rule), used for drawings and error analysis.
+    Returns (matched-gt mask, matched-prediction mask, IoU matrix predictions x gt)."""
+    iou = box_iou(boxes, gt) if len(boxes) and len(gt) else np.zeros((len(boxes), len(gt)))
+    gt_hit, pred_hit = np.zeros(len(gt), bool), np.zeros(len(boxes), bool)
+    for i in np.argsort(-scores):
+        free = np.where(~gt_hit & (iou[i] >= iou_thr))[0] if len(gt) else []
+        if len(free):
+            j = free[np.argmax(iou[i, free])]
+            gt_hit[j], pred_hit[i] = True, True
+    return gt_hit, pred_hit, iou
+
+
+def difference_metric(metric_a, metric_b):
+    """Metric function for a PAIRED comparison: a - b on the same photo list. Passed to bootstrap_by_store, which
+    resamples the same stores (same seed) for both models, so the interval of the difference is not inflated by
+    the store-to-store variation that both models share."""
+    def diff(photos):
+        a, b = metric_a(photos), metric_b(photos)
+        return {k: a[k] - b[k] for k in a}
+    return diff

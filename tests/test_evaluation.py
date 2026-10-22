@@ -1,6 +1,6 @@
 import numpy as np
 
-from src.evaluation.detection import (bootstrap_by_store, gt_counts, ignore_below_floor, operating_point,
+from src.evaluation.detection import (bootstrap_by_store, difference_metric, greedy_match, gt_counts, ignore_below_floor, operating_point,
                                       per_photo_results, summarize)
 
 W, H = 1000, 800  # synthetic photos and ids
@@ -90,3 +90,19 @@ def test_bootstrap_resamples_whole_stores_and_is_reproducible():
 
 def test_gt_counts():
     assert gt_counts(_gt({"s01_aaaaaaaa": A, "s02_bbbbbbbb": B}, STORES)) == {"s01_aaaaaaaa": 2, "s02_bbbbbbbb": 1}
+
+
+def test_greedy_match_pairs_by_score_and_reports_unmatched():
+    gt = np.array(A, float)
+    boxes = np.array([A[0], [100, 100, 158, 300], [500, 100, 560, 300]], float)   # second duplicates the first gt
+    gt_hit, pred_hit, _ = greedy_match(gt, boxes, np.array([.9, .8, .7]), 0.5)
+    assert gt_hit.tolist() == [True, False] and pred_hit.tolist() == [True, False, False]
+
+
+def test_paired_difference_uses_the_same_resampled_stores():
+    store_of = {"p1": "s01", "p2": "s02", "p3": "s03"}
+    value = {"p1": 0.0, "p2": 10.0, "p3": 20.0}
+    a = lambda photos: {"x": float(np.mean([value[p] for p in photos]))}      # noqa: E731
+    b = lambda photos: {"x": float(np.mean([value[p] for p in photos])) - 3.0}  # a model that is always 3 lower
+    ci = bootstrap_by_store(store_of, difference_metric(a, b), 200, seed=0)
+    assert ci["x"] == (3.0, 3.0)   # every resample sees the same stores for both: the difference is exactly 3
