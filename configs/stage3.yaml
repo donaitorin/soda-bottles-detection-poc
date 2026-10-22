@@ -1,0 +1,19 @@
+# Settings for the Stage 3 export and sanity checks (src/annotations, scripts/export_coco.py, scripts/check_coco.py).
+# Owner decision: the Grounding DINO pre-labels are used as-is (pseudo-labels, `prelabel_unverified`) for train,
+# val and test. A photo with an owner annotation in a Label Studio JSON export wins (`owner_corrected`).
+# EVERY metric computed against these files measures agreement with Grounding DINO, not accuracy.
+seed: 0
+prelabel_config: configs/prelabel.yaml      # single source of the minimum-height rule and of the Label Studio tag names
+predictions: data/prelabels/predictions.json
+export:
+  output_dir: data/annotations/coco         # gitignored: train.json, val.json, test.json, summary.json
+  backup_dir: data/annotations/ls_backups   # gitignored: verbatim copies of the Label Studio JSON exports, with a UTC timestamp
+  choices_name: products                    # name of the per-photo Choices tag in configs/label_studio/bottle_project.xml
+  image_extensions: [.jpg, .jpeg, .png]     # COCO file_name = <photo id> + the extension of the symlink in data/labelstudio/images
+sanity:
+  duplicate_iou: 0.9                        # two boxes of one photo above this IoU are duplicates
+  boxes_per_photo: [1, 150]                 # outside this range is a warning (the pre-labels have median 61, max 124)
+  id_regex: '^s\d{2}_[0-9a-f]{8}(\.[A-Za-z]+)?$'   # COCO file names hold photo ids only
+  n_drawn_photos: 20
+  draw_dir: data/review/coco_check          # gitignored
+  draw_max_side_px: 1100
