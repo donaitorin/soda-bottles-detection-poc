@@ -101,6 +101,10 @@ python scripts/train_timing.py                   # seconds per iteration, memory
 python scripts/train_detector.py --overfit       # sanity check: overfit 10 train photos
 caffeinate -i conda run --no-capture-output -n soda-poc python scripts/train_detector.py            # full run (checkpoint every epoch in models/stage5/, log in data/logs/stage5/)
 caffeinate -i conda run --no-capture-output -n soda-poc python scripts/train_detector.py --resume   # continue after an interruption
+python scripts/predict_val.py --model frcnn --checkpoint models/stage5/frcnn_v1/best.pt --name frcnn_ft_best_val   # fine-tuned model on val (also --checkpoint .../epoch_30.pt --name frcnn_ft_last_val)
+python scripts/evaluate_detections.py            # now also the paired bootstrap of the difference by store (configs/stage4.yaml, `paired`)
+python scripts/stage5_error_analysis.py          # disagreements with the pseudo-labels by cause, drawings in data/review/stage5_errors/
+python scripts/plot_training.py                  # loss and val agreement curves -> reports/figures/stage_05_training.svg (numbers only, committed)
 ```
 
 Pre-commit leak check (the owner runs this once per clone; the assistant never installs it):
