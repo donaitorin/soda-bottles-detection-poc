@@ -33,3 +33,10 @@ truststore==0.10.5
 annotated-doc==0.0.5
 # Stage 4 evaluation (COCO reference implementation of mAP)
 pycocotools==2.0.11
+# Stage 6 catalog: Postgres access (pgvector). Pure-Python driver; psycopg is LGPL so it is not used.
+pg8000==1.31.5
+scramp==1.4.18
+asn1crypto==1.5.1
+python-dateutil==3.0.0
+six==1.17.0
+tzdata==2026.5
