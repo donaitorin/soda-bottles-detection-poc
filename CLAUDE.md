@@ -15,7 +15,7 @@ Learning POC: detect soda bottles in store shelf photos and identify which ones 
 
 - **Do not use YOLO or Ultralytics.** The detector is torchvision's Faster R-CNN (`fasterrcnn_resnet50_fpn_v2`).
 - Pre-labeling (Stage 2): Grounding DINO (`IDEA-Research/grounding-dino-base` via `transformers`, pinned revision, weights cached in `models/hf_cache/`, prompt `bottle.`, settings frozen in `configs/prelabel.yaml`). The torchvision Faster R-CNN with COCO weights stays in the repo as the Stage 4 baseline and a fallback pre-labeler. SAM 2 is used only in Stage 6 (masks for crops). Manual validation in Label Studio.
-- Permissive licenses (MIT, BSD, Apache 2.0). MPL-2.0 is accepted only for unmodified third-party dependencies. Ask before adding anything else.
+- Permissive licenses (MIT, BSD, Apache 2.0). MPL-2.0 is accepted only for unmodified third-party dependencies. Ask before adding anything else. **Documented exception (owner decision, applies when Stage 7 starts):** EasyOCR for pipeline variant B with its LGPL dependency `python-bidi`, used unmodified and imported normally (reason: the best OCR engine in the trial, runs on MPS; Tesseract is the licence-clean fallback). EasyOCR and its extra dependencies go in a separate pinned `requirements-ocr.txt`, installed only for variant B; `requirements.txt` (the core pipeline) stays permissive only. The pipeline must run fully without the OCR requirements (variant A) and fail with a clear message if `use_ocr` is requested without them. The exception and its reason go into the final report's dependency list.
 - Python 3.11 in a conda environment named `soda-poc` (conda-forge only), defined in `environment.yml`. Pinned dependencies in `requirements.txt`, installed through the pip section of `environment.yml` (PyTorch has no official conda packages, so torch and torchvision come from pip). No `.venv`, no pyenv.
 - **Never run anything in conda's `base` env.** Every script and test runs inside `soda-poc` (`conda activate soda-poc`, or `conda run -n soda-poc ...`).
 - Fixed random seeds for anything with randomness.
@@ -124,6 +124,9 @@ Stage 6b (inside `soda-poc`):
 python scripts/embed_timing.py                   # DINOv2 speed and memory on MPS (before anything is built on it)
 python scripts/preview_catalog_augment.py        # one contact sheet per product in data/review/catalog_augment/: originals next to their augmented variants (owner reviews before the database)
 python scripts/check_catalog_photos.py --final   # the gate for a FINAL report: fails while sources.csv still says unknown or the packaging is unconfirmed
+python scripts/build_catalog.py                  # catalog embeddings + own database soda_catalog (originals only, see configs/stage6.yaml catalog.use_augmented)
+python scripts/evaluate_identification.py        # development numbers on the labeled val crops, leave one store out
+python scripts/diagnose_domain_gap.py            # diagnostic (in memory only): domain gap, degraded catalog
 ```
 
 OCR trial (decision input only; the ONE exception to "everything runs in soda-poc": it runs in the throwaway conda env `ocr-trial`, never in soda-poc; EasyOCR, python-bidi (LGPL) and pytesseract are accepted for the trial only and are never added to requirements.txt or the pipeline):
