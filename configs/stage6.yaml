@@ -1,11 +1,11 @@
 # Settings for Stage 6a: the val crop sample (the yardstick), the crop labeling project and the catalog photo folder.
 # Crops are cut from the Grounding DINO pseudo-label boxes of val. The owner labels them WITHOUT suggestions.
 seed: 0
-products: [coca_classic, coca_classic_returnable, coca_zero, coca_zero_returnable, coca_light,
-           sprite, sprite_returnable, sprite_zero, pepsi, pepsi_returnable]
+# The target list was reduced to 6 products for the tests (owner decision). Everything else is `unknown`: Pepsi, Sprite Zero, and the
+# returnable versions of Zero, Sprite and Fanta. The removed ids are out of scope (not "low data").
+products: [coca_classic, coca_classic_returnable, coca_zero, coca_light, sprite, fanta]
 other_labels: [unknown, not_a_bottle, cannot_tell]   # unknown = another brand, water, juice; not_a_bottle = can, carton, fragment or any pseudo-label error
-brands: {coca_classic: coca, coca_classic_returnable: coca, coca_zero: coca, coca_zero_returnable: coca, coca_light: coca,
-         sprite: sprite, sprite_returnable: sprite, sprite_zero: sprite, pepsi: pepsi, pepsi_returnable: pepsi}
+brands: {coca_classic: coca, coca_classic_returnable: coca, coca_zero: coca, coca_light: coca, sprite: sprite, fanta: fanta}   # Fanta is its own brand
 crops:
   coco: data/annotations/coco/val.json         # from scripts/export_coco.py
   margin: 0.10                                 # each side, as a share of the box width / height
@@ -37,3 +37,23 @@ catalog:
   min_per_product: 3
   min_short_side_px: 300
   required_columns: [file, product_id, source_url, license, uruguay_packaging_checked]
+  crop:                                        # scripts/crop_catalog_photos.py: each photo holds ONE bottle on a plain background
+    prompt_config: configs/prelabel.yaml       # frozen Grounding DINO (prompt, thresholds); NO Stage 2 filters: a single bottle fills much of the photo and the "oversized" filter would drop it
+    margin: 0.10                               # same margin as the shelf crops
+    crops_dir: data/catalog/crops              # gitignored; <product id>/<same file name>
+    review_dir: data/review/catalog_crops      # gitignored; contact sheet of all crops
+    several_boxes: largest                     # more than one box = almost surely fragments of the same bottle: use the largest box, and list the photo
+    no_box: whole_photo                        # no box: use the whole photo, and list the photo
+    contact_sheet: {cell_px: 260}
+    overrides: {"fanta/fanta_01.jpg": enclosing}   # the 2 boxes are the bottle and its base: after looking at the photo, use the box around both
+  augment:                                     # for the catalog augmentations of Stage 6b (about 5 to 6 per photo, applied to the bottle crop)
+    per_photo: 6
+    rotation_deg: 7                            # small rotations
+    perspective_distortion: 0.12               # mild perspective
+    scale: [0.85, 1.15]
+    brightness: 0.25
+    contrast: 0.25
+    blur_sigma: [0.1, 1.2]                     # slight blur
+    # NOT used, on purpose (they differ from the detector training augmentations of Stage 5):
+    #   horizontal flip: it MIRRORS the label text (COCA-COLA, ZERO, RETORNABLE...), which is exactly the evidence that separates variants;
+    #   hue or saturation changes: colour is one of the main cues between products (Coca-Cola red, Light silver, Fanta orange, Sprite green).

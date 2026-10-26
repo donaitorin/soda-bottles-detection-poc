@@ -58,11 +58,11 @@ def _task(pid, boxes, choices, **ann):
 
 def test_read_owner_annotations_converts_percent_back_to_pixels():
     sizes = {k: (W, H) for k in PRED}
-    owner, notes = read_owner_annotations([_task("s01_aaaaaaaa", [[100, 100, 160, 300]], ["pepsi"]),
+    owner, notes = read_owner_annotations([_task("s01_aaaaaaaa", [[100, 100, 160, 300]], ["sprite"]),
                                            {"data": {"photo_id": "s01_bbbbbbbb"}, "annotations": []},
                                            {"data": {"photo_id": "s99_zzzzzzzz"}, "annotations": []}],
                                           "bottle", "products", sizes)
-    assert list(owner) == ["s01_aaaaaaaa"] and owner["s01_aaaaaaaa"]["products"] == ["pepsi"]
+    assert list(owner) == ["s01_aaaaaaaa"] and owner["s01_aaaaaaaa"]["products"] == ["sprite"]
     assert np.allclose(owner["s01_aaaaaaaa"]["boxes"][0], [100, 100, 160, 300])
     assert notes["task_without_submitted_annotation"] == 1 and notes["task_with_unknown_photo_id"] == 1
 

@@ -11,13 +11,9 @@
     <Choice value="coca_classic"/>
     <Choice value="coca_classic_returnable"/>
     <Choice value="coca_zero"/>
-    <Choice value="coca_zero_returnable"/>
     <Choice value="coca_light"/>
     <Choice value="sprite"/>
-    <Choice value="sprite_returnable"/>
-    <Choice value="sprite_zero"/>
-    <Choice value="pepsi"/>
-    <Choice value="pepsi_returnable"/>
+    <Choice value="fanta"/>
     <Choice value="other_bottles_present"/>
   </Choices>
 </View>
