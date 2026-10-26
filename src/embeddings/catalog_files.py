@@ -13,8 +13,10 @@ from PIL import Image
 
 
 def check_catalog_photos(photos_dir: Path, sources_csv: Path, products: list[str], extensions: list[str], required_columns: list[str],
-                         min_short_side: int, min_per_product: int, target_per_product: int) -> tuple[list[str], list[str], Counter]:
-    """Returns (errors, warnings, photos per product). Errors must be fixed; warnings are reported."""
+                         min_short_side: int, min_per_product: int, target_per_product: int, final: bool = False) -> tuple[list[str], list[str], Counter]:
+    """Returns (errors, warnings, photos per product). Errors must be fixed; warnings are reported.
+    `final=True` is the gate for writing a FINAL report: every row must have a real source_url and license (not `unknown`) and the
+    Uruguayan packaging confirmed (`yes`); until then the check fails."""
     errors, warnings, counts = [], [], Counter()
     if not photos_dir.is_dir():
         return ["the catalog photos folder does not exist (python scripts/check_catalog_photos.py --init creates it)"], [], counts
@@ -69,7 +71,11 @@ def check_catalog_photos(photos_dir: Path, sources_csv: Path, products: list[str
             if (row.get("uruguay_packaging_checked") or "").strip().lower() not in ("yes", "no"):
                 errors.append(f"{rel}: uruguay_packaging_checked must be yes or no")
             elif row["uruguay_packaging_checked"].strip().lower() == "no":
-                warnings.append(f"{rel}: Uruguayan packaging not confirmed")
+                (errors if final else warnings).append(f"{rel}: Uruguayan packaging not confirmed")
+            if final:
+                for col in ("source_url", "license"):
+                    if (row.get(col) or "").strip().lower() == "unknown":
+                        errors.append(f"{rel}: {col} is still 'unknown' (a final report needs the real source and license)")
     for rel in rows:
         if rel and not (photos_dir / rel).exists():
             errors.append(f"sources.csv lists {rel}, which does not exist")

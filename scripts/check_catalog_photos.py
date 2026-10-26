@@ -22,6 +22,7 @@ from src.embeddings.catalog_files import check_catalog_photos  # noqa: E402
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default="configs/stage6.yaml")
+    parser.add_argument("--final", action="store_true", help="the gate for a FINAL report: fails while any row still says unknown or the packaging is unconfirmed")
     parser.add_argument("--init", action="store_true", help="create the empty folders (one per product id) and a header-only sources.csv, then exit")
     args = parser.parse_args()
     cfg = yaml.safe_load((REPO_ROOT / args.config).read_text())
@@ -36,7 +37,7 @@ def main() -> int:
         print(f"created {len(cfg['products'])} folders in {c['photos_dir']}/ and {Path(c['sources_csv']).name} (header only)")
         return 0
     errors, warnings, counts = check_catalog_photos(REPO_ROOT / c["photos_dir"], REPO_ROOT / c["sources_csv"], cfg["products"], c["image_extensions"],
-                                                    c["required_columns"], c["min_short_side_px"], c["min_per_product"], c["target_per_product"])
+                                                    c["required_columns"], c["min_short_side_px"], c["min_per_product"], c["target_per_product"], args.final)
     print("photos per product: " + ", ".join(f"{p} {counts[p]}" for p in cfg["products"]))
     for w in warnings:
         print("warning:", w)

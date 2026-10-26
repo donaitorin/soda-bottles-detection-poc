@@ -74,3 +74,14 @@ def test_rename_plan_is_sorted_numbered_and_lowercase():
     from src.embeddings.catalog_files import plan_renames
     plan = plan_renames("sprite", ["sprite_3.JPG", "a_photo.jpeg", "sprite_1.png"])
     assert plan == [("a_photo.jpeg", "sprite_01.jpeg"), ("sprite_1.png", "sprite_02.png"), ("sprite_3.JPG", "sprite_03.jpg")]
+
+
+def test_the_final_gate_fails_while_a_row_says_unknown_or_packaging_is_unconfirmed(tmp_path):
+    files = [_photo(tmp_path, p, n) for p in PRODUCTS for n in (1, 2)]
+    _sources(tmp_path, files, source_url="unknown", license="unknown", uruguay_packaging_checked="no")
+    assert _check(tmp_path)[0] == []                                              # fine for development
+    errors, _, _ = check_catalog_photos(tmp_path, tmp_path / "sources.csv", **ARGS, final=True)
+    text = " | ".join(errors)
+    assert "source_url is still 'unknown'" in text and "license is still 'unknown'" in text and "packaging not confirmed" in text
+    _sources(tmp_path, files)                                                      # real source, license, packaging yes
+    assert check_catalog_photos(tmp_path, tmp_path / "sources.csv", **ARGS, final=True)[0] == []
