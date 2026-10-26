@@ -55,7 +55,7 @@ def test_wrong_names_folders_duplicates_and_too_few_photos_are_errors(tmp_path):
     Image.new("RGB", (400, 600), (20, 40, 90)).save(tmp_path / "coca_classic" / "coca_classic_01.jpg")
     _sources(tmp_path, files + ["sprite/sprite_02.jpg"])
     text = " | ".join(_check(tmp_path)[0])
-    assert "name must be sprite_NN" in text and "not one of the 10 product ids" in text and "identical file" in text
+    assert "name must be sprite_NN" in text and "not one of the target product ids" in text and "identical file" in text
 
 
 def test_small_images_and_unconfirmed_packaging_are_warnings(tmp_path):
@@ -68,3 +68,9 @@ def test_small_images_and_unconfirmed_packaging_are_warnings(tmp_path):
 def test_a_missing_folder_is_an_error_without_a_path(tmp_path):
     errors, _, _ = check_catalog_photos(tmp_path / "nope", tmp_path / "nope" / "sources.csv", **ARGS)
     assert len(errors) == 1 and str(tmp_path) not in errors[0]
+
+
+def test_rename_plan_is_sorted_numbered_and_lowercase():
+    from src.embeddings.catalog_files import plan_renames
+    plan = plan_renames("sprite", ["sprite_3.JPG", "a_photo.jpeg", "sprite_1.png"])
+    assert plan == [("a_photo.jpeg", "sprite_01.jpeg"), ("sprite_1.png", "sprite_02.png"), ("sprite_3.JPG", "sprite_03.jpg")]

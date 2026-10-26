@@ -33,7 +33,7 @@ def check_catalog_photos(photos_dir: Path, sources_csv: Path, products: list[str
     seen = {}
     for folder in sorted(p for p in photos_dir.iterdir() if p.is_dir()):
         if folder.name not in products:
-            errors.append(f"folder {folder.name}: not one of the 10 product ids")
+            errors.append(f"folder {folder.name}: not one of the target product ids")
             continue
         for path in sorted(folder.iterdir()):
             if path.name.startswith("."):
@@ -79,3 +79,15 @@ def check_catalog_photos(photos_dir: Path, sources_csv: Path, products: list[str
         elif counts[p] < target_per_product:
             warnings.append(f"{p}: {counts[p]} photos (target {target_per_product})")
     return errors, warnings, counts
+
+
+def plan_renames(product: str, names: list[str]) -> list[tuple[str, str]]:
+    """(old name, new name) for the photos of one product: sorted by original name, `<product>_NN.<ext>` with NN from 01
+    and a lowercase extension. A name that is already right stays as it is."""
+    if len(names) > 99:
+        raise ValueError(f"{product}: more than 99 photos")
+    plan = []
+    for i, old in enumerate(sorted(names), 1):
+        suffix = Path(old).suffix.lower()
+        plan.append((old, f"{product}_{i:02d}{suffix}"))
+    return plan
