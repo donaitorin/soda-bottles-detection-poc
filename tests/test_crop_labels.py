@@ -31,3 +31,18 @@ def test_invalid_missing_skipped_and_unknown_tasks_are_counted_not_used():
 def test_latest_annotation_wins():
     task = {"annotations": [{"id": 1, "updated_at": "a"}, {"id": 2, "updated_at": "b"}, {"id": 3, "updated_at": "z", "was_cancelled": True}]}
     assert latest_annotation(task)["id"] == 2
+
+
+def test_audit_flags_every_kind_of_problem():
+    from src.embeddings.crop_labels import audit_export
+    tasks = [_task("s01_aaaaaaaa_000", ["coca_classic"]),
+             _task("s01_aaaaaaaa_001", ["unknown", "coca_classic"]),
+             _task("s01_aaaaaaaa_001", ["unknown"]),                               # duplicate task
+             {"data": {"crop_id": "s99_zzzzzzzz_000"}, "annotations": []},         # not in sample
+             _task("s02_bbbbbbbb_000", ["not_in_the_set"])]
+    flags = audit_export(tasks, "product", ALLOWED, KNOWN | {"s03_cccccccc_000"})
+    assert flags["several_labels"] == ["s01_aaaaaaaa_001"] and flags["duplicate_task"] == ["s01_aaaaaaaa_001"]
+    assert flags["not_in_sample"] == ["s99_zzzzzzzz_000"] and flags["invalid_label"] == ["s02_bbbbbbbb_000"]
+    assert flags["not_in_export"] == ["s03_cccccccc_000"]
+    clean = audit_export([_task("s01_aaaaaaaa_000", ["unknown"])], "product", ALLOWED, {"s01_aaaaaaaa_000"})
+    assert all(v == [] for v in clean.values())

@@ -22,7 +22,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
 from src.data.paths import check_output_dir  # noqa: E402
-from src.embeddings.crop_labels import read_crop_labels  # noqa: E402
+from src.embeddings.crop_labels import audit_export, read_crop_labels  # noqa: E402
 
 
 def main() -> int:
@@ -61,6 +61,31 @@ def main() -> int:
                         "label": labels[cid]["label"], "lead_time_s": labels[cid]["lead_time"]})
     counts = Counter(v["label"] for v in labels.values())
     n = len(labels)
+    export = json.loads(src.read_text())
+    sample_ids = set(mapping)
+    tasks_ids = set()
+    for name in args.name or [cfg["crops"]["sample"]["name"]]:
+        tasks_path = REPO_ROOT / cfg["crops"]["mapping_dir"] / name / "tasks.json"
+        if tasks_path.exists():
+            tasks_ids |= {t["data"]["crop_id"] for t in json.loads(tasks_path.read_text())}
+    flags = audit_export(export, cfg["label_studio"]["from_name"], allowed, sample_ids)
+    if tasks_ids and tasks_ids != sample_ids:
+        print(f"WARNING: tasks.json and mapping.csv hold different crop ids ({len(tasks_ids ^ sample_ids)} differ)")
+    bad = {k: v for k, v in flags.items() if v}
+    print("audit of the export: " + ("clean (every sample crop has exactly one valid label, ids match tasks.json and mapping.csv)" if not bad else ""))
+    for k, v in bad.items():
+        print(f"  FLAG {k}: {len(v)} crop(s): {', '.join(v[:20])}")
+    by_store = {}
+    for cid, v in labels.items():
+        by_store.setdefault(mapping[cid]["store_code"], Counter())[v["label"]] += 1
+    order = cfg["products"] + cfg["other_labels"]
+    print("labels per store:")
+    print("| store | " + " | ".join(order) + " | total |")
+    for store in sorted(by_store):
+        print(f"| {store} | " + " | ".join(str(by_store[store][l]) for l in order) + f" | {sum(by_store[store].values())} |")
+    few = [p for p in cfg["products"] if counts[p] < 5]
+    if few:
+        print("LOW COUNT: fewer than 5 val crops for " + ", ".join(f"{p} ({counts[p]})" for p in few) + ": limits what can be concluded for them.")
     print(f"{n} of {len(mapping)} crops labeled; notes {dict(notes)}; backup copy in {backup_dir.relative_to(REPO_ROOT)}/; labels in {path.relative_to(REPO_ROOT)}")
     for label in cfg["products"] + cfg["other_labels"]:
         print(f"  {label}: {counts[label]}")
