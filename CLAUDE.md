@@ -118,11 +118,19 @@ python scripts/check_catalog_photos.py [--init]              # catalog photo fol
 caffeinate -i conda run --no-capture-output -n soda-poc python scripts/train_detector.py --config configs/stage5_v2.yaml   # second detector run, 12 epochs
 ```
 
+Stage 6b (inside `soda-poc`):
+
+```bash
+python scripts/embed_timing.py                   # DINOv2 speed and memory on MPS (before anything is built on it)
+python scripts/preview_catalog_augment.py        # one contact sheet per product in data/review/catalog_augment/: originals next to their augmented variants (owner reviews before the database)
+python scripts/check_catalog_photos.py --final   # the gate for a FINAL report: fails while sources.csv still says unknown or the packaging is unconfirmed
+```
+
 OCR trial (decision input only; the ONE exception to "everything runs in soda-poc": it runs in the throwaway conda env `ocr-trial`, never in soda-poc; EasyOCR, python-bidi (LGPL) and pytesseract are accepted for the trial only and are never added to requirements.txt or the pipeline):
 
 ```bash
 conda run --no-capture-output -n ocr-trial python scripts/ocr_trial.py --engine easyocr --device mps    # or --device cpu, --min-height 900, --select largest
-conda run --no-capture-output -n ocr-trial python scripts/ocr_trial.py --engine tesseract               # needs the system package: the owner runs `brew install tesseract`
+conda run --no-capture-output -n ocr-trial python scripts/ocr_trial.py --engine tesseract               # needs the system package (`brew install tesseract`, done). The trial is finished and the env `ocr-trial` was removed: re-create it to rerun
 ```
 
 Pre-commit leak check (the owner runs this once per clone; the assistant never installs it):
