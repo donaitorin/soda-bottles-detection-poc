@@ -84,7 +84,7 @@ def main() -> int:
         per_photo[pid] = (len(r["extra"]), len(r["missed"]), len(gt_boxes[pid]), len(cans[pid]))
         results[pid] = (np.array(gt_boxes[pid]).reshape(-1, 4), boxes, r)
 
-    print(f"AGREEMENT with Grounding DINO pseudo-labels (not accuracy). Fine-tuned best.pt, {ea['variant']} output, score >= {ea['score_threshold']}, IoU >= 0.5, val")
+    print(f"AGREEMENT with Grounding DINO pseudo-labels (not accuracy). Fine-tuned model ({Path(ea['predictions']).name}), {ea['variant']} output, score >= {ea['score_threshold']}, IoU >= 0.5, val")
     print(f"matched (TP): {tp}; extra predictions: {sum(extra.values())}; missed pseudo-labels: {sum(missed.values())}")
     print("| Cause | Extra predictions | Missed pseudo-labels |\n|---|---:|---:|")
     for c in CAUSES:

@@ -52,6 +52,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--csv", default="data/logs/stage5/frcnn_v1/train_log.csv")
     parser.add_argument("--out", default="reports/figures/stage_05_training.svg")
+    parser.add_argument("--run-label", default="Stage 5 training curves", help="title of the figure")
     parser.add_argument("--baseline-ap50", type=float, default=0.884, help="Stage 4 Faster R-CNN COCO + filters agreement, drawn as a reference line")
     args = parser.parse_args()
     rows = list(csv.DictReader((REPO_ROOT / args.csv).open()))
@@ -63,7 +64,7 @@ def main() -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
 
     parts = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="{W}" height="{H}" font-family="sans-serif">',
-             "<title>Stage 5 training curves: training loss and validation agreement with Grounding DINO per epoch</title>",
+             f"<title>{args.run_label}: training loss and validation agreement with Grounding DINO per epoch</title>",
              f'<rect width="{W}" height="{H}" fill="white"/>']
     # Left: training loss
     loss = [float(r["train_loss"]) for r in rows]
