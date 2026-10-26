@@ -48,6 +48,7 @@ catalog:
     overrides: {"fanta/fanta_01.jpg": enclosing}   # the 2 boxes are the bottle and its base: after looking at the photo, use the box around both
   augment:                                     # for the catalog augmentations of Stage 6b (about 5 to 6 per photo, applied to the bottle crop)
     per_photo: 6
+    preview_dir: data/review/catalog_augment   # gitignored; one contact sheet per product
     rotation_deg: 7                            # small rotations
     perspective_distortion: 0.12               # mild perspective
     scale: [0.85, 1.15]
@@ -57,3 +58,14 @@ catalog:
     # NOT used, on purpose (they differ from the detector training augmentations of Stage 5):
     #   horizontal flip: it MIRRORS the label text (COCA-COLA, ZERO, RETORNABLE...), which is exactly the evidence that separates variants;
     #   hue or saturation changes: colour is one of the main cues between products (Coca-Cola red, Light silver, Fanta orange, Sprite green).
+embeddings:                                     # Stage 6b: DINOv2 embeddings (src/embeddings/embed.py)
+  model_id: facebook/dinov2-base                # Apache-2.0, 346 MB of weights
+  revision: f9e44c814b77203eaa57a6bdbbd535f21ede1415   # pinned commit on the Hugging Face Hub
+  cache_dir: models/hf_cache                    # gitignored
+  image_size: 224                               # the crop is padded to a square FIRST (no centre crop: bottles are tall and a centre crop would cut off cap and base), then resized
+  pad_fill: [255, 255, 255]                     # padding colour: white, like the catalog photo backgrounds
+  mean: [0.485, 0.456, 0.406]                   # ImageNet statistics (what DINOv2 was trained with)
+  std: [0.229, 0.224, 0.225]
+  pooling: cls                                  # cls | mean (mean of the patch tokens); 768-dimension vector, L2-normalised
+  batch_size: 16
+  timing: {warmup_batches: 2, timed_batches: 5, batch_sizes: [1, 8, 16, 32]}
