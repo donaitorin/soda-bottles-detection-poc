@@ -82,6 +82,10 @@ What stands out:
 - **Small bottles are not the problem:** 13 extras and 4 misses (under 3% of the image height).
 - **Pseudo-label errors that the model refused:** 27 (20 fragments, 7 cans), i.e. cases where the model disagrees with an error.
 
+## Addendum: second run `frcnn_v2` (12 epochs, compressed cosine)
+
+The owner ran it (clean log, 12 epochs, about 87 s per epoch). Evaluated like the first run (same scripts, matching and store bootstrap; agreement with Grounding DINO pseudo-labels, not accuracy): the last epoch has AP@0.5 92.8 [89.3, 94.3] and AP@0.5:0.95 79.1 [73.9, 81.7], recall at score 0.3 of 91.0 [86.0, 92.9]; against the COCO baseline the paired difference is +4.2 points AP@0.5 [2.5, 9.8] and +10.7 AP@0.5:0.95 [9.5, 13.2]; against the `frcnn_v1` last epoch it is +1.2 AP@0.5 [0.5, 3.6] and +0.4 AP@0.5:0.95 [-0.2, 1.9]. Recommended detector for the next stages: the `frcnn_v2` last epoch. Full tables, the error analysis and the reasoning are in `reports/stage_06b_prep.md`, section 7; curve in `reports/figures/stage_06_frcnn_v2_training.svg`.
+
 ## Limits
 
 - All numbers are agreement with Grounding DINO, on 41 photos from 6 stores. The bootstrap covers store sampling only.
