@@ -1,0 +1,31 @@
+<View>
+  <!-- Crop labeling for the soda bottle POC (Stage 6). One task per crop, ONE answer per crop.
+       No model suggestion is shown: the owner's answer is the yardstick. Left: the crop. Right: where it is in the photo
+       (yellow box). Keys: 1-9 and 0 pick a product, u = unknown, n = not a bottle, c = cannot tell; Ctrl+Enter submits. -->
+  <Header value="Crop $crop_id"/>
+  <View style="display: flex; gap: 16px; align-items: flex-start">
+    <View style="flex: 1">
+      <Image name="crop" value="$image" zoom="true" zoomControl="true" rotateControl="false"/>
+    </View>
+    <View style="flex: 1">
+      <Header value="Where it is in the photo"/>
+      <Image name="context" value="$context" zoom="true" zoomControl="true" rotateControl="false"/>
+    </View>
+  </View>
+  <Header value="Which product is the bottle in the crop?"/>
+  <Choices name="product" toName="crop" choice="single-radio" showInline="false">
+    <Choice value="coca_classic" hotkey="1"/>
+    <Choice value="coca_classic_returnable" hotkey="2"/>
+    <Choice value="coca_zero" hotkey="3"/>
+    <Choice value="coca_zero_returnable" hotkey="4"/>
+    <Choice value="coca_light" hotkey="5"/>
+    <Choice value="sprite" hotkey="6"/>
+    <Choice value="sprite_returnable" hotkey="7"/>
+    <Choice value="sprite_zero" hotkey="8"/>
+    <Choice value="pepsi" hotkey="9"/>
+    <Choice value="pepsi_returnable" hotkey="0"/>
+    <Choice value="unknown" hotkey="u"/>
+    <Choice value="not_a_bottle" hotkey="n"/>
+    <Choice value="cannot_tell" hotkey="c"/>
+  </Choices>
+</View>
