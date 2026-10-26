@@ -127,13 +127,32 @@ What this limits:
 - **On shelf crops it reads almost nothing useful:** random mix of 30 labeled val crops (products and a few unknown, spread over stores): text of some kind in 14 of 30 crops (23 of 30 after upscaling to 900 px), but **a keyword in 0 of 30**. The crops are small (the median product crop is about 330 px tall and many show a label only a few pixels high). Using the tallest crops of each label (30 crops, 150 to 1,200 px tall, most above 500 px) gives a keyword in 6 of 30: Fanta read on 3 of 4 Fanta crops (and RETORNABLE once), nothing for Coca-Cola, Sprite or Light. The false readings there are real text that misleads: `FANTA` on two Coca-Cola crops that are **promo packs tying a Coca-Cola bottle to a Fanta bottle** ("AHORRO FANTA" on the sleeve), and `RETORNABLE` on an `unknown` crop (a returnable of another product).
 - Of the 86 product-labeled val crops, 42 are at least 400 px tall and 27 at least 500 px tall; below that, the text is too small for this engine.
 
-**Tesseract: not run yet.** The system package is not installed and I may not install system packages. The exact command for you to run: `brew install tesseract` (English data is enough: the words are Latin script). Then I run `python scripts/ocr_trial.py --engine tesseract` in the throwaway environment (where `pytesseract` is already installed). PaddleOCR was not trialed (about 200 MB, CPU only on this Mac, and the same LGPL dependency).
+**Tesseract 5.5.3** (system package installed by the owner with `brew install tesseract`, English data; `pytesseract` in the throwaway environment), same 60 crops, CPU only (Tesseract has no GPU or MPS backend). Time per crop: **0.06 s median** (0.07 s with crops upscaled to 900 px). Its own pre-step upscales crops to at least 300 px tall; "900" adds a bigger upscale.
 
-**Recommendation for variant B (not wired into any code yet).** Keep variant B in the plan, with **EasyOCR as the engine** (it runs on MPS at about 0.07 s per crop, Apache-2.0, nothing heavy), but expect its evidence on shelf photos like these to be thin: it reads Fanta and Sprite logos and printed words (LIGHT, RETORNABLE, ZERO) only on large, sharp crops (catalog photos, and the tallest shelf crops), and it cannot read the Coca-Cola logo, so it will not help to tell `coca_classic` from `coca_zero` on small shelf crops. Its most plausible value is on the demo set (better photos, larger crops) and as a **contradiction signal** (for example a clear "FANTA" or "SPRITE" on a crop identified as Coca-Cola) rather than as positive evidence. Rules to carry into Stage 7: whole-word matching only; require brand context (a bare RETORNABLE does not identify a product); expect false evidence from promo sleeves and legal text; read only crops above a minimum height. Tesseract, once run, is the fallback to compare; the decision on it waits for that run.
+Side by side (expected words read, lenient; the catalog crops are clean photos, the val crops are small shelf crops):
+
+| | EasyOCR (MPS or CPU) | Tesseract (CPU) |
+|---|---|---|
+| Catalog: sprite (SPRITE) | 5 / 5 | 4 / 5 (3 / 5 upscaled to 900) |
+| Catalog: fanta (FANTA) | 5 / 5 | 4 / 5 (5 / 5 upscaled) |
+| Catalog: coca_light (COCA-COLA, LIGHT) | 5 / 10 | 2 / 10 (3 / 10 upscaled) |
+| Catalog: coca_classic_returnable (COCA-COLA, RETORNABLE) | 3 / 10 | 2 / 10 (3 / 10 upscaled) |
+| Catalog: coca_zero (COCA-COLA, ZERO) | 2 / 10 lenient, 0 strict | 0 / 10 |
+| Catalog: coca_classic (COCA-COLA) | 0 / 5 | 0 / 5 |
+| 30 random labeled shelf crops: a keyword read | 0 | 0 |
+| 30 tallest labeled shelf crops: expected words read / crops with any keyword | 3 (Fanta) / 6 | 0 / 4 |
+| Time per crop | 0.07 s MPS, 0.09 s CPU | 0.06 s CPU |
+| Added to the environment | 10 packages (about 63 MB) plus about 100 MB of weights; `python-bidi` is LGPL | 1 package (`pytesseract`) plus the system binary (Apache-2.0); no LGPL |
+
+False readings (Tesseract): the same `FANTA` inside FANTASIA on a Coca-Cola returnable label and the same `FANTA` on the promo packs that carry a Fanta bottle (that word is really printed), plus a spurious `FANTA` on an `unknown` crop produced by noise (the lenient fuzzy match fires on garbage text) and `RETORNABLE` on a Fanta crop. It also never reads the Coca-Cola logo or ZERO.
+
+**Final engine recommendation for variant B: EasyOCR.** It reads more than Tesseract on every comparison that matters (Sprite, Fanta, Light and RETORNABLE on clean catalog crops; Fanta on the tallest shelf crops, where Tesseract reads none of the expected words), at the same speed class (0.07 s per crop on MPS), and it is the same PyTorch stack. Neither engine reads the Coca-Cola script logo, and neither reads anything useful on ordinary small shelf crops, so variant B's evidence will be thin on photos like the current ones: its likely value is on the demo set and as a contradiction signal. The one cost is the **LGPL `python-bidi`** package that EasyOCR depends on: it was accepted for the trial only, so before Stage 7 adds EasyOCR to `requirements.txt` the owner has to approve that dependency; if not, **Tesseract is the licence-clean fallback** (roughly half the reading rate here, the same speed). Rules for Stage 7 (both engines): whole-word matching, brand context required (a bare RETORNABLE identifies nothing), expect misleading text from promo packs and legal text, read only crops above a minimum height (about 400 px tall), and treat a clear contradicting brand word as a `review` signal. PaddleOCR was not trialed (about 200 MB, CPU only here, the same LGPL dependency).
+
+The throwaway environment `ocr-trial` was removed after the trial (`conda env remove -n ocr-trial`); the trial script and config stay in the repository and need that environment re-created to run again.
 
 ## Limits
 
-- The OCR trial covers EasyOCR only (Tesseract waits for `brew install tesseract`); 60 crops, small samples, and the keyword counts are lower bounds (some photos show the back of the bottle).
+- The OCR trial: 60 crops, small samples, and the keyword counts are lower bounds (some photos show the back of the bottle).
 - The val crop labels are 180 crops from 6 stores; `coca_light` has 3.
 - The Uruguayan packaging of the catalog photos and their sources are still to be filled in by the owner.
 
