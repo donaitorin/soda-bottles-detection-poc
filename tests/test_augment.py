@@ -65,3 +65,11 @@ def test_a_dark_variant_gets_a_dark_background_no_light_frame():
     arr = np.asarray(apply_params(img, p)).astype(int)
     corner, edge_mid = arr[2, 2], arr[100, 2]
     assert corner.max() < 215 and abs(corner - edge_mid).max() < 25      # the filled corner matches the (darkened) background
+
+
+def test_the_committed_config_caps_the_zoom_at_1_05_and_has_no_flip_or_colour_keys():
+    import yaml
+    cfg = yaml.safe_load(open("configs/stage6.yaml"))["catalog"]["augment"]
+    assert cfg["scale"] == [0.85, 1.05] and cfg["per_photo"] == 6
+    assert not any(k in cfg for k in FORBIDDEN)
+    assert all(0.85 <= p["scale"] <= 1.05 for p in sample_params(np.random.default_rng(0), cfg, 200))
