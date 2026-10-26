@@ -1,0 +1,39 @@
+# Settings for Stage 6a: the val crop sample (the yardstick), the crop labeling project and the catalog photo folder.
+# Crops are cut from the Grounding DINO pseudo-label boxes of val. The owner labels them WITHOUT suggestions.
+seed: 0
+products: [coca_classic, coca_classic_returnable, coca_zero, coca_zero_returnable, coca_light,
+           sprite, sprite_returnable, sprite_zero, pepsi, pepsi_returnable]
+other_labels: [unknown, not_a_bottle, cannot_tell]   # unknown = another brand, water, juice; not_a_bottle = can, carton, fragment or any pseudo-label error
+brands: {coca_classic: coca, coca_classic_returnable: coca, coca_zero: coca, coca_zero_returnable: coca, coca_light: coca,
+         sprite: sprite, sprite_returnable: sprite, sprite_zero: sprite, pepsi: pepsi, pepsi_returnable: pepsi}
+crops:
+  coco: data/annotations/coco/val.json         # from scripts/export_coco.py
+  margin: 0.10                                 # each side, as a share of the box width / height
+  sample:
+    name: val_sample
+    n: 180                                     # about 150 to 200 crops
+    min_per_store: 15
+    max_per_photo: 8
+  images_dir: data/labelstudio/crops           # gitignored; crop images named <crop id>.jpg
+  context_dir: data/labelstudio/crops/context  # gitignored; the photo with the box drawn, named <crop id>.jpg
+  mapping_dir: data/crops                      # gitignored; <name>/mapping.csv and <name>/tasks.json
+  display_min_long_side_px: 480                # small crops are upscaled for DISPLAY only (embeddings use the original pixels)
+  display_max_long_side_px: 900
+  context_long_side_px: 700
+label_studio:
+  url_prefix: /data/local-files/?d=labelstudio/crops/
+  context_prefix: /data/local-files/?d=labelstudio/crops/context/
+  from_name: product
+  to_name: crop
+labels_export:
+  output_dir: data/annotations/crop_labels     # gitignored
+  backup_dir: data/annotations/crop_ls_backups # gitignored
+  min_unknown_warning: 40                      # fewer unknown crops than this: add a targeted batch
+catalog:
+  photos_dir: data/catalog/product_photos      # gitignored; <product id>/<product id>_NN.<ext> and sources.csv
+  sources_csv: data/catalog/product_photos/sources.csv
+  image_extensions: [.jpg, .jpeg, .png, .webp]
+  target_per_product: 5
+  min_per_product: 3
+  min_short_side_px: 300
+  required_columns: [file, product_id, source_url, license, uruguay_packaging_checked]
