@@ -1,0 +1,22 @@
+# OCR engine trial (decision input only; runs in a THROWAWAY environment, never in soda-poc; nothing is wired into the pipeline).
+seed: 0
+catalog_crops_dir: data/catalog/crops           # the 30 bottle crops of the catalog photos (scripts/crop_catalog_photos.py)
+val_labels: data/annotations/crop_labels/val_sample_labels.csv
+val_mapping: data/crops/val_sample/mapping.csv
+val_quota: {coca_classic: 4, coca_classic_returnable: 4, coca_zero: 5, coca_light: 3, sprite: 4, fanta: 4, unknown: 6}   # about 30 labeled val crops
+output_dir: data/review/ocr_trial               # gitignored: contact sheets and results_<engine>.json
+model_dir: models/ocr_trial                     # gitignored: EasyOCR weights
+easyocr: {languages: [en, es]}
+tesseract: {config: "--psm 11", upscale_to_min_height_px: 300}   # sparse text; small crops are upscaled before reading
+fuzzy_min_ratio: 0.80                           # difflib ratio for a keyword match (4-letter words need an exact match)
+# Keywords the OCR should find, per product (a LOWER bound on what is visible: some photos show the back of the bottle).
+expect:
+  coca_classic: [COCA-COLA]
+  coca_classic_returnable: [COCA-COLA, RETORNABLE]
+  coca_zero: [COCA-COLA, ZERO]
+  coca_light: [COCA-COLA, LIGHT]
+  sprite: [SPRITE]
+  fanta: [FANTA]
+  unknown: []
+keywords: [COCA-COLA, ZERO, LIGHT, RETORNABLE, SPRITE, FANTA]
+contact_sheet: {columns: 5, cell_px: 230}
