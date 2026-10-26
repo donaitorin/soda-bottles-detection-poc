@@ -107,6 +107,15 @@ python scripts/stage5_error_analysis.py          # disagreements with the pseudo
 python scripts/plot_training.py                  # loss and val agreement curves -> reports/figures/stage_05_training.svg (numbers only, committed)
 ```
 
+Stage 6a (inside `soda-poc`; crops and labels are photo-id based and gitignored; the catalog photos are product photos from the internet, never shelf photos):
+
+```bash
+python scripts/build_crop_sample.py                          # ~180 val crops for the owner to label (no suggestions) -> data/labelstudio/crops/, data/crops/val_sample/{mapping.csv,tasks.json}
+python scripts/export_crop_labels.py --ls-export FILE        # crop labels from a Label Studio JSON export -> data/annotations/crop_labels/ (+ timestamped backup copy)
+python scripts/check_catalog_photos.py [--init]              # catalog photo folder (data/catalog/product_photos/<product id>/<product id>_NN.<ext> + sources.csv); --init creates the empty folders
+caffeinate -i conda run --no-capture-output -n soda-poc python scripts/train_detector.py --config configs/stage5_v2.yaml   # second detector run, 12 epochs
+```
+
 Pre-commit leak check (the owner runs this once per clone; the assistant never installs it):
 
 ```bash
