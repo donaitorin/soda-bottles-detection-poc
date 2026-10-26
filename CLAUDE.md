@@ -1,6 +1,6 @@
 # soda-bottles-detection-poc
 
-Learning POC: detect soda bottles in store shelf photos and identify which ones are one of the 10 target products, and send every other bottle to `unknown`. The full plan, with its 10 stages and their validation gates, is in `docs/PLAN.md`. Read it before any task.
+Learning POC: detect soda bottles in store shelf photos and identify which ones are one of the 6 target products, and send every other bottle to `unknown`. The full plan, with its 10 stages and their validation gates, is in `docs/PLAN.md`. Read it before any task.
 
 ## How we work
 
@@ -36,8 +36,8 @@ Learning POC: detect soda bottles in store shelf photos and identify which ones 
 - `data/raw/` is never modified. Everything derived goes into other folders.
 - The detector has a single generic `bottle` class for soda bottles, regardless of brand. Brand and variant are resolved later with embeddings, never in the detector labels.
 - **Cans are out of scope**: there is no `can` class and cans are not labeled.
-- **Target products (10 ids):** `coca_classic`, `coca_classic_returnable`, `coca_zero`, `coca_zero_returnable`, `coca_light`, `sprite`, `sprite_returnable`, `sprite_zero`, `pepsi`, `pepsi_returnable`. Details in `docs/catalog_variants.md`. Size and material (PET or glass) are secondary catalog metadata, not hard success criteria.
-- **Any bottle that is not one of these 10 products ends up as `unknown`** (other brands, water, juice). The detector still labels all of them as `bottle`; the decision is made after the embeddings (see "Unknown handling" in `docs/PLAN.md`).
+- **Target products (6 ids, reduced from 10 by owner decision for the tests):** `coca_classic`, `coca_classic_returnable` (the only returnable kept), `coca_zero`, `coca_light`, `sprite`, `fanta` (new; its own brand). Details in `docs/catalog_variants.md`. The removed ids (`coca_zero_returnable`, `sprite_returnable`, `sprite_zero`, `pepsi`, `pepsi_returnable`) are out of scope, not "low data". Size and material (PET or glass) are secondary catalog metadata, not hard success criteria.
+- **Any bottle that is not one of these 6 products ends up as `unknown`** (other brands, water, juice, Pepsi, Sprite Zero, and the returnable versions of Zero, Sprite and Fanta). The detector still labels all of them as `bottle`; the decision is made after the embeddings (see "Unknown handling" in `docs/PLAN.md`).
 - **Labels are Grounding DINO pseudo-labels (owner decision).** Train, val and test use the pre-labels as they are (`label_source: prelabel_unverified`); an owner annotation in a Label Studio JSON export wins (`owner_corrected`). Every metric on val or test measures **agreement with Grounding DINO, not accuracy**, and every report must say so each time such a number is shown. Only the future demo set (owner-corrected) gets accuracy numbers.
 - The test split is not used to tune anything before stage 8.
 - Photos are split by store or shelf, never by individual photo.
@@ -112,6 +112,8 @@ Stage 6a (inside `soda-poc`; crops and labels are photo-id based and gitignored;
 ```bash
 python scripts/build_crop_sample.py                          # ~180 val crops for the owner to label (no suggestions) -> data/labelstudio/crops/, data/crops/val_sample/{mapping.csv,tasks.json}
 python scripts/export_crop_labels.py --ls-export FILE        # crop labels from a Label Studio JSON export -> data/annotations/crop_labels/ (+ timestamped backup copy)
+python scripts/normalize_catalog_photos.py [--apply]       # one-time: rename catalog photos to <product id>_NN.<ext>, remove empty folders of removed products, fill sources.csv (dry run by default)
+python scripts/crop_catalog_photos.py                        # crop each catalog photo to its bottle with the frozen Grounding DINO -> data/catalog/crops/, contact sheet in data/review/catalog_crops/
 python scripts/check_catalog_photos.py [--init]              # catalog photo folder (data/catalog/product_photos/<product id>/<product id>_NN.<ext> + sources.csv); --init creates the empty folders
 caffeinate -i conda run --no-capture-output -n soda-poc python scripts/train_detector.py --config configs/stage5_v2.yaml   # second detector run, 12 epochs
 ```

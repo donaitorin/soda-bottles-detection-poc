@@ -2,14 +2,14 @@
 
 ## Goal and scope
 
-The POC validates whether, from store shelf photos, a system can detect soda bottles, identify which ones are one of the 10 target products (Coca-Cola, Sprite and Pepsi lines) and send every other bottle to `unknown`, with a low rate of confident wrong identifications. It follows the same architecture as the bathroom asset POC: a generic detector, identification through embeddings, text evidence, and a confidence engine.
+The POC validates whether, from store shelf photos, a system can detect soda bottles, identify which ones are one of the 6 target products (Coca-Cola Classic, Classic returnable, Zero and Light; Sprite; Fanta) and send every other bottle to `unknown`, with a low rate of confident wrong identifications. It follows the same architecture as the bathroom asset POC: a generic detector, identification through embeddings, text evidence, and a confidence engine.
 
-**Central question:** can the system count and identify the 10 target products in a shelf photo, sending every other bottle to `unknown`, accurately enough to reduce manual counting?
+**Central question:** can the system count and identify the 6 target products in a shelf photo, sending every other bottle to `unknown`, accurately enough to reduce manual counting?
 
 **In scope**
 
 - Generic detection of soda bottles in the photo.
-- Identification of the 10 target products (Coca-Cola Classic, Zero and Light; Sprite and Sprite Zero; Pepsi; with returnable versions where they exist), with every other bottle sent to `unknown`, plus size when visible.
+- Identification of the 6 target products (Coca-Cola Classic, Classic returnable, Zero and Light; Sprite; Fanta), with every other bottle (Pepsi, Sprite Zero, other returnables, other brands, water, juice) sent to `unknown`, plus size when visible. The list was reduced from 10 ids to 6 for the tests by owner decision.
 - OCR of the packaging as additional evidence.
 - Confidence with three outcomes: automatic, human review, unknown.
 - Full pipeline from photo to JSON inventory, with metrics.
@@ -77,7 +77,7 @@ The plan assumes an own set of shelf photos, a GPU or Apple Silicon accelerator 
 - **Environment:** Python 3.11 in a conda environment (`soda-poc`, conda-forge only, defined in `environment.yml`; torch and torchvision installed with pip because PyTorch has no official conda packages), compatible PyTorch and torchvision versions, Docker for Postgres with pgvector and for Label Studio. Nothing runs in conda's `base` env.
 - **Label provenance (owner decision, Stage 3):** the goal of this POC is to define, understand and test the end-to-end process, not to measure real accuracy on hard field photos. Train, val and test use the Grounding DINO pre-labels as they are (pseudo-labels, `label_source: prelabel_unverified`); nobody corrects them. **Every metric computed on val or test measures agreement with Grounding DINO, not accuracy, and every report must say so each time such a number is shown.** The split rules (by store, test used once in stage 8) still apply, so the process stays correct when real labels exist.
 - **Demo set (decided by the owner, plan only for now; it is the real yardstick):** the current photos are hard field photos and stay as train, val and test. Later the owner adds a fourth set, **demo**, of well-taken photos without extreme cases, to demonstrate the system. It is pre-labeled with the same pipeline and then corrected by the owner in Label Studio (every box and the product of each crop). It is never used for training, tuning or calibration, and is evaluated once at the end. **Only demo-set numbers are reported as accuracy.** Ideally it comes from stores not in the current photos; if it shares stores with train, the report says its result is optimistic. Demo photos used for the stage 6 reference catalog are not used to evaluate. The same anonymous id, mapping and leak-check rules apply to the new photos.
-- **Catalog (decided by the owner):** closed list of the 10 target products, in `docs/catalog_variants.md`, decided in stage 0. The reference images come from about 5 clean product photos per product that the owner provides (Open Food Facts first, CC BY-SA; otherwise other public product images, accepted for this internal POC only), not from labeled shelf crops. They must match the Uruguayan packaging of the variant and are a dependency to replace before any commercial use.
+- **Catalog (decided by the owner):** closed list of the 6 target products, in `docs/catalog_variants.md`, decided in stage 0. The reference images come from about 5 clean product photos per product that the owner provides (Open Food Facts first, CC BY-SA; otherwise other public product images, accepted for this internal POC only), not from labeled shelf crops. They must match the Uruguayan packaging of the variant and are a dependency to replace before any commercial use.
 
 **Suggested repo structure**
 
@@ -117,7 +117,7 @@ There are ten stages in order, and each one ends with a validation gate. Do not 
     - Are bottles in back rows that are only half visible labeled?
     - The box fits the visible part, never the estimated part behind another bottle.
     - Do water or juice bottles count as `bottle`? Recommended: yes, because telling them apart from soda is also the embeddings' job. If the answer is no, the guide says so explicitly, since a class that depends on what is inside the bottle is hard to label consistently.
-3. Define the closed list of catalog products. It has 10 ids, listed in `docs/catalog_variants.md`: `coca_classic`, `coca_classic_returnable`, `coca_zero`, `coca_zero_returnable`, `coca_light`, `sprite`, `sprite_returnable`, `sprite_zero`, `pepsi` and `pepsi_returnable`. Returnable bottles can be PET or glass (glass ones in crates count as returnable products, Classic or Zero). Size and material (PET or glass) are secondary metadata stored in the catalog, not hard success criteria. Any other bottle (other brands, water, juice) is `unknown`; there is no `other brand` class. This list is used from stage 6 on, not for the detector.
+3. Define the closed list of catalog products. It started with 10 ids and was **reduced to 6 for the tests by owner decision**; it is listed in `docs/catalog_variants.md`: `coca_classic`, `coca_classic_returnable` (the only returnable kept), `coca_zero`, `coca_light`, `sprite` and `fanta` (new; it used to be `unknown`). Glass returnable Coca-Cola Classic bottles in crates count as `coca_classic_returnable`. Size and material (PET or glass) are secondary metadata stored in the catalog, not hard success criteria. Any other bottle (Pepsi, Sprite Zero, the returnable versions of Zero, Sprite and Fanta, other brands, water, juice) is `unknown`; there is no `other brand` class. The removed ids are out of scope, not "low data". This list is used from stage 6 on, not for the detector.
 4. Create the `.gitignore` before any photo enters the repo. It ignores everything under `data/` (photos, pre-labels, Label Studio exports, COCO annotations, crops, masks, catalog images) except `.gitkeep` files and `data/splits/*.txt`, plus `models/`, Label Studio and Postgres volumes, and notebook outputs.
 5. Bring up `docker-compose` with Postgres + pgvector and Label Studio. Their data volumes live in ignored folders.
 6. Create the conda environment `soda-poc` (conda-forge only, Python 3.11) from `environment.yml`.
@@ -206,55 +206,59 @@ There are ten stages in order, and each one ends with a validation gate. Do not 
 
 ### Stage 6: reference catalog and embeddings
 
-**Goal:** identify the product (one of the 10 ids, or `unknown`) of each detected bottle by comparing against a catalog.
+**Goal:** identify the product (one of the 6 ids, or `unknown`) of each detected bottle by comparing against a catalog.
 
 1. **Catalog from product photos (owner decision):** embeddings replace training a classifier, so the catalog needs only a few reference images per product. It is built **only** from `data/catalog/product_photos/<product id>/<product id>_NN.<ext>` (ignored by git; about 5 clean photos per product that the owner provides) with `sources.csv` next to it (file, product id, source URL, license if known, whether the Uruguayan packaging was checked). The source of every catalog entry is recorded in the catalog table. Photos must match the Uruguayan packaging of the variant. They are never used for evaluation, and the final report lists them as a dependency to replace before any commercial use. There is no labeling of train crops for the catalog.
-2. **Catalog variety:** the product photos are mostly frontal, so each one gets several automatic augmentations (small rotations, mild perspective, scale, brightness and contrast, slight blur), each stored as its own catalog entry tagged `augmented` with its source photo. In 6b, measure on the val sample whether the augmented catalog identifies better than the plain one, and keep it only if it does. AI-generated product images are not used by default (they tend to alter label text, cap colour and bottle shape, which are exactly the cues that separate the variants); if the owner wants to try them later, it is a separate, tagged experiment measured on the val sample.
+1b. **Catalog crops:** each product photo holds exactly one bottle on a plain background, so before embedding it is cropped to the bottle with the frozen Grounding DINO (prompt `bottle.`, the same 10% margin as the shelf crops, no Stage 2 filters). More than one box is almost surely fragments of the same bottle: the largest box is used and the photo listed; no box: the whole photo is used and the photo listed. Crops go to an ignored folder, with a contact sheet of all crops in an ignored review folder for the owner to check.
+2. **Catalog variety:** the product photos are mostly frontal, so each one gets several automatic augmentations (small rotations, mild perspective, scale, brightness and contrast, slight blur; about 5 or 6 per photo, applied to the bottle crop), each stored as its own catalog entry tagged `augmented` with its source photo. **No horizontal flips (they mirror the label text) and no hue or saturation changes (colour separates the products: Coca-Cola red, Light silver, Fanta orange, Sprite green)**; these differ from the detector training augmentations on purpose. In 6b, measure on the val sample whether the augmented catalog identifies better than the plain one, and keep it only if it does. AI-generated product images are not used by default (they tend to alter label text, cap colour and bottle shape, which are exactly the cues that separate the variants); if the owner wants to try them later, it is a separate, tagged experiment measured on the val sample.
 3. **Domain gap:** studio photos with a plain background look different from shelf crops. Measure it in 6b (similarity of val crops to their correct product, product photos only). If identification is poor because of it, propose a small number of shelf crops in the catalog as a second step; this is not done by default.
 4. Try two cropping methods for the query crops: the box with a margin of about 10%, and the SAM 2 mask (box prompts, Apache 2.0; check its speed on MPS first) over a neutral background. Keep whichever gives better results.
 5. Compute the embedding with DINOv2 (base): a 768-dimension vector, normalized.
 6. Store in pgvector (through `pg8000`), with columns for product, brand, size, material (PET or glass), source image, source URL and license, whether the entry is augmented, and an HNSW index on cosine distance.
-7. **Val crop sample, labeled by hand without suggestions (the yardstick):** about 180 val crops cut from the pseudo-label boxes, stratified by store (proportional, at least 15 per store, at most 8 per photo), in a second Label Studio project (single choice per crop): the 10 product ids, `unknown`, `not_a_bottle`, `cannot_tell`. The `not_a_bottle` share is a direct measure of the pseudo-label precision on val. If too few `unknown` crops come out (under about 40), a small targeted batch from photos with other brands is added. This sample also calibrates the unknown rules (see "Unknown handling": option (a)); the demo set stays whole for the final evaluation. Crops of the demo set are labeled with the same tool later.
-8. Report the number of catalog photos per product (the 10 ids; with their augmentations). Products with too few photos are flagged as **low data** and reported separately, not dropped.
-9. Measure on the val sample top-1 and top-3 accuracy, brand accuracy (Coca-Cola, Sprite or Pepsi) and a confusion matrix across the 10 products plus `unknown`, plus the unknown metrics below. These are **development numbers** (the sample also tunes the rules, so thresholds are tuned leaving one store out); the demo set gives the accuracy.
+7. **Val crop sample, labeled by hand without suggestions (the yardstick):** about 180 val crops cut from the pseudo-label boxes, stratified by store (proportional, at least 15 per store, at most 8 per photo), in a second Label Studio project (single choice per crop): the 6 product ids, `unknown`, `not_a_bottle`, `cannot_tell`. The `not_a_bottle` share is a direct measure of the pseudo-label precision on val. If too few `unknown` crops come out (under about 40), a small targeted batch from photos with other brands is added. This sample also calibrates the unknown rules (see "Unknown handling": option (a)); the demo set stays whole for the final evaluation. Crops of the demo set are labeled with the same tool later.
+8. Report the number of catalog photos per product (the 6 ids; with their augmentations). Products with too few photos are flagged as **low data** and reported separately, not dropped.
+9. Measure on the val sample top-1 and top-3 accuracy, brand accuracy (Coca-Cola, Sprite or Fanta) and a confusion matrix across the 6 products plus `unknown`, plus the unknown metrics below. These are **development numbers** (the sample also tunes the rules, so thresholds are tuned leaving one store out); the demo set gives the accuracy.
 10. Report metrics with a bootstrap confidence interval resampled by store (whole stores are resampled, not photos), because val holds only a few stores; the interval tells us how much a difference between two runs means.
 
 **Gate:** brand accuracy is high, unknown handling is measured, and confusions between products are identified by name (for example, `coca_classic` versus `coca_classic_returnable`). If product photos and shelf photos end up far apart in the embedding space, first add a few shelf crops to the catalog (item 3); only if that is not enough, open a metric-learning sub-stage (fine tune DINOv2 with a contrastive or triplet loss) using pairs of shelf crops.
 
 #### Unknown handling (open-set recognition)
 
-Any bottle that is not one of the 10 target products must end up as `unknown`. The detector still labels every bottle as `bottle` (including water, juice and other brands); the decision happens after the embeddings. Stage 6 builds the pieces and stage 8 calibrates and evaluates them.
+Any bottle that is not one of the 6 target products must end up as `unknown`. The detector still labels every bottle as `bottle` (including water, juice and other brands); the decision happens after the embeddings. Stage 6 builds the pieces and stage 8 calibrates and evaluates them.
 
-1. **Ground truth:** the owner labels the val crop sample in stage 6 (and the demo set crops later): every crop gets one of the 10 ids, `unknown`, `not_a_bottle` or `cannot_tell`. The sample must include enough `unknown` crops (other brands, water, juice); without labeled unknowns the thresholds cannot be calibrated.
-2. **Negative gallery:** besides the 10 products, the catalog may hold reference images of common non-target bottles (for example water, juices, other sodas), all tagged `unknown`. If the nearest neighbors are mostly from this gallery, the crop is `unknown`. Measure whether this helps compared with thresholds alone.
+1. **Ground truth:** the owner labels the val crop sample in stage 6 (and the demo set crops later): every crop gets one of the 6 ids, `unknown`, `not_a_bottle` or `cannot_tell`. The sample must include enough `unknown` crops (other brands, water, juice); without labeled unknowns the thresholds cannot be calibrated.
+2. **Negative gallery:** besides the 6 products, the catalog may hold reference images of common non-target bottles (for example water, juices, other sodas), all tagged `unknown`. If the nearest neighbors are mostly from this gallery, the crop is `unknown`. Measure whether this helps compared with thresholds alone.
 3. **Rejection rules,** applied per crop after top-K retrieval:
     - top-1 similarity below a threshold → `unknown`;
     - margin between the best product and the second best *different* product below a threshold → `review`, or `unknown` if the similarity is also low;
     - top-K neighbors disagree on the product (k-NN vote below a minimum share) → `review` or `unknown`;
-    - OCR contradicts the top-1 (for example reads "PEPSI" when top-1 is a Coca-Cola product) → `review`.
+    - OCR contradicts the top-1 (for example reads "FANTA" when top-1 is a Coca-Cola product) → `review`; this rule exists only in pipeline variant B (with OCR).
 4. **Calibration:** all thresholds are tuned on val only, possibly per product if one product behaves differently. The calibration ground truth is the **val crop sample** (about 180 crops labeled by the owner, including unknowns; decided: option (a)), which keeps the demo set whole for the final evaluation. If the sample turns out too small to calibrate, a calibration part of the demo set is the fallback (option (b)), to be agreed first. Test is used once, in stage 8.
-5. **Metrics** (also in the metrics table): accuracy on known products; unknown rejection rate (share of truly unknown crops classified as `unknown` or `review`); false known rate (share of truly unknown crops assigned to one of the 8 products with `automatic` status). The false known rate is the most important number and should stay below 5%.
+5. **Metrics** (also in the metrics table): accuracy on known products; unknown rejection rate (share of truly unknown crops classified as `unknown` or `review`); false known rate (share of truly unknown crops assigned to one of the 6 products with `automatic` status). The false known rate is the most important number and should stay below 5%.
 
-### Stage 7: OCR as evidence
+### Stage 7: OCR as evidence (pipeline variant B)
 
-**Goal:** use the packaging text to resolve the confusions found in stage 6.
+**Goal:** build the second pipeline variant, embeddings plus OCR evidence, so that the two variants can be compared. The final pipeline exists in **two variants** (owner request): **A, embeddings only** (catalog similarity plus the unknown rules, stage 6) and **B, embeddings plus OCR** (text read on the crop). Same detector, same catalog, same val calibration sample for both; the thresholds of each variant are calibrated separately.
 
-1. Run PaddleOCR on each crop.
-2. Normalize the text: uppercase, no accents, no double spaces.
-3. Define keywords per product: "ZERO", "SIN AZUCAR", "LIGHT", "SPRITE", "PEPSI", "ZERO AZUCARES", "RETORNABLE" (the returnable text on the label may be the clearest way to separate returnable from non-returnable bottles), and sizes such as "500 ML", "1,5 L" or "2,25 L".
-4. Compare with fuzzy matching (`rapidfuzz`), because OCR confuses O with 0 and similar characters.
-5. Measure the percentage of crops in which OCR reads something useful.
+1. **OCR engine:** PaddleOCR was the plan. Before installing anything, compare PaddleOCR, EasyOCR (Apache 2.0, PyTorch) and Tesseract on licence, install weight and speed on this Mac (Apple Silicon: MPS or CPU); recommend one and ask before installing it.
+2. Run the OCR on the same crop used for the embedding.
+3. Normalize the text: uppercase, no accents, no double spaces.
+4. Keywords per product: "COCA-COLA", "ZERO", "ZERO AZUCARES", "LIGHT", "RETORNABLE" (the returnable text on the label may be the clearest way to separate `coca_classic_returnable` from `coca_classic`), "SPRITE", "FANTA", and sizes such as "500 ML", "1,5 L" or "2,25 L".
+5. Compare with fuzzy matching (`rapidfuzz`), because OCR confuses O with 0 and similar characters.
+6. Use the evidence as agreement or contradiction signals for stage 8 (contradiction sends the crop to `review`).
+7. Measure the percentage of crops in which OCR reads anything useful, and the time cost per photo of each variant.
+8. **Compare A and B** on the val sample as development numbers (thresholds calibrated separately for each variant, leave-one-store-out) and, once, on the demo set as the real numbers: top-1 accuracy, per-product confusion matrices, unknown rejection rate, false known rate, and the automatic / review / unknown shares. Use a paired bootstrap of the difference by store. Report separately the pairs where OCR is expected to matter most: `coca_classic` vs `coca_zero` vs `coca_light`, and `coca_classic` vs `coca_classic_returnable`.
 
-**Gate:** compare on val visual-only identification against visual + OCR. OCR stays only if it reduces the specific confusions from stage 6.
+**Gate:** both variants run and are compared on val. OCR stays as an option only if it reduces the specific confusions found in stage 6 (otherwise the report says it did not help).
 
 ### Stage 8: confidence and decision
 
 **Goal:** make the system know when it does not know.
 
-1. Gather the signals per detection: detector score, top-1 similarity, margin between the top-1 product and the best different product, and whether OCR agrees or contradicts.
+1. Gather the signals per detection: detector score, top-1 similarity, margin between the top-1 product and the best different product, and (variant B only) whether OCR agrees or contradicts.
 2. Combine them into a simple score: a weighted sum or a logistic regression trained on val.
-3. Calibrate the thresholds on the val crop sample labeled by the owner (about 180 crops, including unknowns; see "Unknown handling") for the three outcomes: automatic, human review and unknown, using the rejection rules from "Unknown handling" in stage 6. Cosine similarity is not a probability: 0.94 does not mean 94% certainty. Val must contain labeled `unknown` crops, otherwise this step cannot be done.
-4. Evaluate **only once** on the demo set, with the thresholds already fixed (it is never used to tune or calibrate anything; demo photos used for the reference catalog are excluded). This is the only accuracy number. Test is also used once, but it has no product labels, so only the detection agreement and the automatic / review / unknown percentages are reported for it, as behavior of the pipeline, not accuracy.
+3. **Calibrate each variant (A and B) separately** on the val crop sample labeled by the owner (about 180 crops, including unknowns; see "Unknown handling") for the three outcomes: automatic, human review and unknown, using the rejection rules from "Unknown handling" in stage 6. Cosine similarity is not a probability: 0.94 does not mean 94% certainty. Val must contain labeled `unknown` crops, otherwise this step cannot be done.
+4. Evaluate **only once** on the demo set, for each variant, with the thresholds already fixed (it is never used to tune or calibrate anything; demo photos used for the reference catalog are excluded). This is the only accuracy number. Test is also used once, but it has no product labels, so only the detection agreement and the automatic / review / unknown percentages are reported for it, as behavior of the pipeline, not accuracy.
 
 5. Report metrics with a bootstrap confidence interval resampled by store (whole stores are resampled, not photos), because val and test hold only a few stores each; the interval tells us how much a difference between two runs means.
 
@@ -264,19 +268,20 @@ Any bottle that is not one of the 10 target products must end up as `unknown`. T
 
 **Goal:** process a new photo end to end and measure the operational value.
 
-1. `POST /analyze` endpoint in FastAPI that receives a photo and returns the inventory as JSON.
+1. `POST /analyze` endpoint in FastAPI that receives a photo and returns the inventory as JSON. **A request option selects the pipeline variant** (for example `use_ocr: true` or `false`: B embeddings plus OCR, or A embeddings only), and the response says which variant produced it (`"variant": "embeddings"` or `"embeddings_ocr"`).
 2. Also return the photo annotated with boxes, product and status.
 3. Resolve review cases in Label Studio or in a minimal UI.
-4. Measure time per photo and compare it with a manual count of the same shelf.
+4. Measure time per photo, for each variant, and compare it with a manual count of the same shelf.
 5. The final report gives **accuracy only for the demo set** (well-taken photos, corrected by the owner). Numbers on val and test are agreement with Grounding DINO pseudo-labels and are labeled that way every time; if the demo set shares stores with train, its number is marked optimistic.
 
 ```json
 {
   "image": "shelf_042.jpg",
+  "variant": "embeddings_ocr",
   "detections": [
-    {"box": [412, 188, 470, 402], "product": "coca_zero", "size": "500 ml",
+    {"box": [412, 188, 470, 402], "product": "coca_zero", "size": "1.5 L",
      "confidence": 0.95, "status": "automatic"},
-    {"box": [478, 190, 534, 400], "product": "coca_classic", "size": "500 ml",
+    {"box": [478, 190, 534, 400], "product": "coca_classic", "size": "1.5 L",
      "confidence": 0.81, "status": "review"},
     {"box": [540, 192, 596, 398], "product": "unknown", "size": null,
      "confidence": 0.41, "status": "unknown"}
@@ -297,11 +302,11 @@ Targets are initial hypotheses, as in the original document: the POC exists to f
 | 3 | Pre-label precision and recall (IoU 0.5) against owner-corrected labels, biased toward the pre-labeler; correction minutes per photo | demo set (when it exists) | Record |
 | 4 | Faster R-CNN COCO baseline mAP@0.5, mAP@0.5:0.95, recall: **agreement with Grounding DINO** (also accuracy on demo) | val (agreement), demo (accuracy) | Record as floor |
 | 5 | Trained detector mAP@0.5 and recall: **agreement with Grounding DINO** (also accuracy on demo) | val (agreement), demo (accuracy) | Beat the baseline; recall of 90% or more |
-| 6 | Brand accuracy (Coca-Cola, Sprite, Pepsi), product top-1 and top-3 | demo crops (manual labels) | Brand 90% or more; top-3 80% or more |
+| 6 | Brand accuracy (Coca-Cola, Sprite, Fanta), product top-1 and top-3 | demo crops (manual labels) | Brand 90% or more; top-3 80% or more |
 | 6 | Accuracy on known products | demo crops | Record |
 | 6 / 8 | Unknown rejection rate (truly unknown crops sent to `unknown` or `review`) | val sample (calibration), demo (once) | Record |
 | 6 / 8 | False known rate (truly unknown crops assigned to a product as `automatic`) | val sample (calibration), demo (once) | Below 5% |
-| 7 | Top-1 improvement with OCR versus visual only | demo crops | Any improvement on the known confusions |
+| 7 | Variant B (embeddings + OCR) minus variant A (embeddings only): top-1, per-product confusions, unknown rejection, false known rate, paired bootstrap by store; share of crops where OCR reads something useful; time per photo of each variant | val sample (development), demo (real) | Any improvement on the known confusions; record |
 | 8 | Rate of confident wrong identifications | demo, only once | Below 5% |
 | 8 | Automatic / review / unknown percentage | demo (accuracy) and test (behavior only) | Record |
 | 9 | Time per photo versus manual count | new photos | Record |
