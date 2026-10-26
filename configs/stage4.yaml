@@ -17,6 +17,9 @@ runs:                                        # name, prediction file and variant
   - {name: ft_best_raw,      file: frcnn_ft_best_val.json, variant: raw,      baseline: false, breakdown: true, operating_threshold: 0.30, label: "Fine-tuned Faster R-CNN, best.pt, raw output"}
   - {name: ft_best_filtered, file: frcnn_ft_best_val.json, variant: filtered, baseline: false, breakdown: true, operating_threshold: 0.30, label: "Fine-tuned Faster R-CNN, best.pt, + Stage 2 filters"}
   - {name: ft_last_raw,      file: frcnn_ft_last_val.json, variant: raw,      baseline: false, breakdown: true, operating_threshold: 0.30, label: "Fine-tuned Faster R-CNN, last epoch (30), raw output"}
+  # Stage 5, second run (frcnn_v2: 12 epochs, last epoch, NOT chosen on val)
+  - {name: ft_v2_last_raw,      file: frcnn_ft_v2_last_val.json, variant: raw,      baseline: false, breakdown: true, operating_threshold: 0.30, label: "Fine-tuned Faster R-CNN v2, last epoch (12), raw output"}
+  - {name: ft_v2_last_filtered, file: frcnn_ft_v2_last_val.json, variant: filtered, baseline: false, breakdown: true, operating_threshold: 0.30, label: "Fine-tuned Faster R-CNN v2, last epoch (12), + Stage 2 filters"}
   - {name: dino_check,     file: dino_val.json,  variant: frozen,   baseline: false, operating_threshold: 0.0,  label: "Grounding DINO frozen (pipeline sanity check, NOT a baseline)"}
 # Paired comparisons: a - b with the SAME resampled stores for both (interval of the difference by store).
 paired:
@@ -24,6 +27,9 @@ paired:
   - {a: ft_best_filtered, b: frcnn_filtered}
   - {a: ft_last_raw,      b: frcnn_raw}          # last epoch was not selected on val: the fairer comparison
   - {a: ft_best_raw,      b: ft_last_raw}        # is the epoch choice distinguishable from noise?
+  - {a: ft_v2_last_raw,      b: ft_last_raw}     # v2 (12 epochs) against v1 last epoch (30): "clearly worse" = interval of AP@0.5 or AP@0.5:0.95 entirely below zero
+  - {a: ft_v2_last_raw,      b: frcnn_raw}
+  - {a: ft_v2_last_filtered, b: frcnn_filtered}
 density_bins: 3                              # photos split into this many bins by number of pseudo-label boxes
 error_look:
   output_dir: data/review/stage4_errors      # gitignored

@@ -1,0 +1,69 @@
+# Settings for the SECOND Stage 5 run, frcnn_v2: 12 epochs, cosine decay compressed to that length (owner decision after the
+# first run showed val agreement peaking early). Its LAST epoch is used, not chosen on val. Same settings as configs/stage5.yaml
+# otherwise. Command: caffeinate -i conda run --no-capture-output -n soda-poc python scripts/train_detector.py --config configs/stage5_v2.yaml
+# Settings for Stage 5: Faster R-CNN fine tuning on the Grounding DINO pseudo-labels (train) and agreement on val.
+# EVERY val/test number is agreement with Grounding DINO, not accuracy; the detector imitates its labels, errors included.
+seed: 0
+device: auto                                  # auto | cpu | mps
+prelabel_config: configs/prelabel.yaml        # source of the 1.5% height floor
+data:
+  train_coco: data/annotations/coco/train.json   # from scripts/export_coco.py (pseudo-labels, label_source in each image)
+  val_coco: data/annotations/coco/val.json
+  num_workers: 4                              # photo decoding and augmentation run on the CPU in these processes
+model:
+  weights_cache: models/torch_cache           # gitignored
+  box_score_thresh: 0.05                      # low: AP needs the whole precision-recall curve; 0.3 is the operating point below
+  box_detections_per_img: 300                 # dense shelves hold up to ~125 boxes
+  rpn_pre_nms_top_n_train: 2000               # torchvision default
+  rpn_post_nms_top_n_train: 2000
+  rpn_pre_nms_top_n_test: 3000                # raised like in Stage 2
+  rpn_post_nms_top_n_test: 3000
+  min_size: 800                               # size the model resizes the short side to internally (set from the timing check)
+  max_size: 1333
+augment:                                      # torchvision.transforms.v2; boxes move with the image
+  hflip_p: 0.5
+  brightness: 0.2
+  contrast: 0.2
+  saturation: 0.2
+  hue: 0.02
+  scale: [0.85, 1.15]                         # zoom out / in a little, no rotation
+  sanitize_min_px: 2.0                        # boxes smaller than this after augmentation are dropped
+train:                                        # chosen from the MPS timing check (reports/stage_05.md); the owner confirms before the full run
+  batch_size: 2
+  epochs: 12
+  optimizer: {lr: 0.005, momentum: 0.9, weight_decay: 0.0001}
+  warmup: {epochs: 1, factor: 0.1}            # linear warmup from lr * factor
+  final_lr_factor: 0.01                       # cosine decay down to lr * factor
+  grad_clip_norm: 10.0
+  amp: false
+  eval_operating_threshold: 0.30
+  max_dets: 300
+run:
+  name: frcnn_v2
+  checkpoint_dir: models/stage5               # gitignored; epoch_XX.pt (model + optimizer, ~330 MB each) every epoch, best.pt (model only)
+  log_dir: data/logs/stage5                   # gitignored; train_log.csv per run
+overfit:                                      # the "overfit 10 images" sanity check
+  n_photos: 10                                # seeded random train photos
+  iterations: 300                             # batches of `batch_size`, no augmentation, constant lr
+  lr: 0.005
+  draw_dir: data/review/stage5_overfit        # gitignored
+timing:
+  warmup_iterations: 2
+  timed_iterations: 5
+  variants:                                   # min_size / batch size / AMP combinations tried
+    - {min_size: 800,  batch_size: 1, amp: false}
+    - {min_size: 800,  batch_size: 2, amp: false}
+    - {min_size: 800,  batch_size: 4, amp: false}
+    - {min_size: 800,  batch_size: 2, amp: true}
+    - {min_size: 1024, batch_size: 2, amp: false}
+error_analysis:                               # scripts/stage5_error_analysis.py (val only)
+  predictions: data/predictions/stage4/frcnn_ft_v2_last_val.json   # written by scripts/predict_val.py --checkpoint (the LAST epoch of frcnn_v2)
+  variant: raw                                # the raw model output shows what it learned (the Stage 2 filters would hide fragments)
+  score_threshold: 0.30
+  can_prompt: "soda can."                     # Grounding DINO proxy that finds cans (out of scope). "can." finds almost none; at 0.3 "soda can." fires on can shelves and not on bottle shelves, but finds only a part of the cans: the can counts are a LOWER BOUND
+  can_box_threshold: 0.30
+  cache: data/predictions/stage5/cans_val.json   # gitignored
+  output_dir: data/review/stage5_errors       # gitignored
+  n_photos: 6                                 # seeded random val photos, plus `include`
+  include: [s06_b8c050ce, s03_05caed03, s15_5bcb84b5]   # can-only photo, can shelf, dense bottle shelf (as in Stage 4)
+  max_side_px: 1100
