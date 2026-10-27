@@ -67,7 +67,7 @@ embeddings:                                     # Stage 6b: DINOv2 embeddings (s
   pad_fill: [255, 255, 255]                     # padding colour: white, like the catalog photo backgrounds
   mean: [0.485, 0.456, 0.406]                   # ImageNet statistics (what DINOv2 was trained with)
   std: [0.229, 0.224, 0.225]
-  pooling: cls                                  # cls | mean (mean of the patch tokens); 768-dimension vector, L2-normalised
+  pooling: cls                                  # cls | mean (mean of all patch tokens) | mean_content (mean of the patches on the crop, padding left out); 768-dimension vector, L2-normalised
   batch_size: 16
   timing: {warmup_batches: 2, timed_batches: 5, batch_sizes: [1, 8, 16, 32]}
 database:                                       # the catalog lives in ITS OWN database inside the running Postgres container (never the Label Studio data)
@@ -86,6 +86,7 @@ identify:                                       # unknown rules (Stage 6b), vari
     top1_similarity: {start: 0.30, stop: 0.95, step: 0.025}
     margin: [0.0, 0.01, 0.02, 0.03, 0.05, 0.08]
     vote: [0.0, 0.4, 0.6, 0.8]
+    neg_gap: [9.0, 0.10, 0.05, 0.02, 0.0, -0.02]   # only when the catalog has negative (unknown) entries: unknown if (best negative similarity - top-1 similarity) is above this; 9.0 = rule off, first so that it wins ties
   utility:                                      # what the tuning maximises (per labeled crop)
     auto_correct: 1.0                           # a known product answered automatically and correctly
     auto_wrong: -5.0                            # a confident wrong answer (including a truly unknown crop answered with a product)
@@ -94,14 +95,44 @@ identify:                                       # unknown rules (Stage 6b), vari
     unknown_for_unknown: 1.0                    # a truly unknown crop rejected as unknown
     review_for_unknown: 0.5
 bootstrap: {n: 1000, level: 0.95}
+answers:                                        # candidate list and two-level answer (src/embeddings/answers.py); development numbers, calibrated leaving one store out
+  coverage: 0.90                                # the candidate list should contain the correct product for about this share of the known crops
+  max_list: 3                                   # a list longer than this is not useful: the crop stays `review`
+  brand_margin_grid: [0.0, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.08, 0.10, 0.12, 0.15, 0.20]
+  brand_precision_target: 0.95                  # t_bm: the smallest brand margin at which the best brand is right at least this often on the calibration crops
+  min_answered: 10                              # ... and at least this many crops are answered at that margin
+shelf_round:                                    # second step: owner-labeled TRAIN shelf crops as extra catalog entries (train photos only, never val or test)
+  name: train_shelf                             # sample name: data/crops/train_shelf/{mapping.csv,tasks.json}
+  coco: data/annotations/coco/train.json
+  split_file: data/splits/train.txt             # every sampled photo must be in this file
+  n_random: 200                                 # stratified by train store, like the val sample
+  n_targeted: 100                               # picked by retrieval for the rare products (the labeler never sees why a crop was picked)
+  min_per_store: 10
+  max_per_photo: 8
+  targeted:
+    products: [coca_light, coca_classic_returnable, sprite]   # the products with the fewest labeled val crops (3, 9, 10)
+    top_rank: 3                                 # the product must be among the top-3 of the crop's retrieval against the 30 originals
+    max_per_photo: 4
+    max_per_store_share: 0.35                   # no store gives more than this share of the targeted crops
+  label_studio_project: soda-bottles-crops-train
+  export_path: data/labelstudio/exports/crop_train_shelf.json
+  candidates_npz: data/crops/train_shelf/candidate_embeddings.npz   # gitignored: CLS embeddings of every train pseudo-label box (for the retrieval pick and the later measurements)
+  catalog:                                      # how the shelf entries are used (src/embeddings/shelf_catalog.py)
+    cap_per_product: 25                         # at most this many shelf entries per product (seeded random subset): a product with many entries must not win only because it has more
+    cap_unknown: 40                             # at most this many negative (unknown) shelf entries
+    balance_vote: true                          # each neighbour in the k-NN vote counts 1 / (entries of its product)
 demo:                                           # scripts/demo_identify.py: a small developer tool to try the current system on one photo
   # DEMO thresholds, NOT an evaluation result: tuned ONCE on all 180 labeled val crops (153 with a product or unknown label; no leave-one-store-out)
   # by scripts/tune_demo_thresholds.py, so any number computed with them on those crops is optimistic. They answer nothing automatically
   # (the Stage 6b finding), so the demo shows review and unknown only; use --t-sim, --t-margin and --t-vote to explore other values.
   thresholds: {t_sim: 0.475, t_margin: 0.05, t_vote: 0.0}
+  # `candidates` (blue) replaces `review` where there is something useful to say: the brand and its variants (two-level answer, brand margin >= t_bm) or a
+  # list of at most max_list products within `delta` of the top-1. delta and t_bm come from scripts/tune_demo_thresholds.py (all 86 known val crops: optimistic).
+  candidates: {delta: 0.0206, t_bm: 0.03, max_list: 3}
+  names: {coca: Coca-Cola, sprite: Sprite, fanta: Fanta, coca_classic: classic, coca_classic_returnable: returnable, coca_zero: zero, coca_light: light}   # short names for the panel
   detector: {checkpoint: models/stage5/frcnn_v2/epoch_12.pt, operating_score: 0.30}   # the last epoch of frcnn_v2 at the operating score; raw output plus the 1.5% height floor
   input_dir: data/demo/inputs                   # gitignored (data/**)
   output_dir: data/demo/outputs                 # gitignored (data/**)
   hash_cache: data/id_maps/content_hashes.csv   # gitignored: sha256 of every raw photo (and the pHash of the test photos), to refuse test photos
-  colours: {automatic: [0, 170, 0], review: [235, 180, 0], unknown: [128, 128, 128]}
+  colours: {automatic: [0, 170, 0], review: [235, 180, 0], unknown: [128, 128, 128], candidates: [40, 110, 230]}   # candidates = brand + variants, or a short list of products (blue)
   panel: {column_width_px: 560, max_photo_height_px: 1700, font_px: 30, max_columns: 3}

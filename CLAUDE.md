@@ -138,6 +138,16 @@ python scripts/demo_identify.py --image data/demo/inputs/photo.jpg [--out PATH] 
 # Test-split photos are REFUSED (content hash compared with the raw test photos); raw file names are never printed: a dataset photo is named by its anonymous id. Needs the Postgres container and python scripts/build_catalog.py.
 ```
 
+Stage 6c, second step (inside `soda-poc`; development numbers on the 180 labeled val crops, leave one store out; the TRAIN crops come from train photos only):
+
+```bash
+python scripts/check_pooling.py                  # mean pooling sanity check: padding share, cls vs mean vs mean_content
+python scripts/build_train_crop_round.py         # 300 TRAIN crops (200 random by store + 100 targeted for rare products) -> data/crops/train_shelf/{mapping.csv,tasks.json,candidate_embeddings.npz}; import tasks.json into the Label Studio project soda-bottles-crops-train, export JSON to data/labelstudio/exports/crop_train_shelf.json
+python scripts/export_crop_labels.py --ls-export data/labelstudio/exports/crop_train_shelf.json --name train_shelf   # -> data/annotations/crop_labels/train_shelf_labels.csv (val_sample_labels.csv untouched)
+python scripts/evaluate_shelf_catalog.py         # (a) originals vs +shelf, (b) + unknown negatives, (c) shelf only; paired bootstrap by store
+python scripts/evaluate_answer_types.py [--catalog originals|originals+shelf|originals+shelf+negatives|shelf]   # candidate list (conformal) and two-level answer vs the current rules
+```
+
 OCR trial (decision input only; the ONE exception to "everything runs in soda-poc": it runs in the throwaway conda env `ocr-trial`, never in soda-poc; EasyOCR, python-bidi (LGPL) and pytesseract are accepted for the trial only and are never added to requirements.txt or the pipeline):
 
 ```bash
