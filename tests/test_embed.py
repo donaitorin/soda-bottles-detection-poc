@@ -3,7 +3,7 @@ import torch
 from PIL import Image
 from transformers import Dinov2Config, Dinov2Model
 
-from src.embeddings.embed import embed, pad_to_square, preprocess
+from src.embeddings.embed import content_patch_mask, embed, pad_to_square, preprocess
 
 CFG = {"image_size": 56, "pad_fill": [255, 255, 255], "mean": [0.485, 0.456, 0.406], "std": [0.229, 0.224, 0.225],
        "pooling": "cls", "batch_size": 2}
@@ -42,3 +42,16 @@ def test_embeddings_are_unit_length_deterministic_and_ordered():
 def test_mean_pooling_also_gives_unit_vectors():
     v = embed(_tiny_model(), [_img(20, 60, (5, 5, 5))], torch.device("cpu"), {**CFG, "pooling": "mean"})
     assert abs(float(np.linalg.norm(v[0])) - 1.0) < 1e-5
+
+
+def test_content_mask_excludes_the_padding_of_a_tall_crop():
+    # 20x60 crop on a 56 px square (4x4 patches of 14): the crop covers the middle 18.7 px, i.e. the two middle columns only
+    m = content_patch_mask([(20, 60), (40, 40)], 56)
+    assert m.shape == (2, 16) and m[0].reshape(4, 4).sum(dim=0).tolist() == [0, 4, 4, 0] and bool(m[1].all())
+
+
+def test_mean_content_pooling_ignores_padding_and_gives_unit_vectors():
+    model, img = _tiny_model(), [_img(20, 60, (5, 5, 5))]
+    v = embed(model, img, torch.device("cpu"), {**CFG, "pooling": "mean_content"})
+    assert abs(float(np.linalg.norm(v[0])) - 1.0) < 1e-5
+    assert not np.allclose(v, embed(model, img, torch.device("cpu"), {**CFG, "pooling": "mean"}), atol=1e-4)
