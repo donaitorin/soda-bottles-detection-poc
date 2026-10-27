@@ -24,10 +24,11 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from src.common.device import get_device  # noqa: E402
 from src.data.paths import check_output_dir  # noqa: E402
+from src.embeddings.classifier import LinearClassifier  # noqa: E402
 from src.embeddings.crop_records import build_records, render  # noqa: E402
 from src.embeddings.embed import embed, load_dinov2  # noqa: E402
 from src.embeddings.eval_data import load_originals, load_shelf, load_val_queries  # noqa: E402
-from src.embeddings.experiments import (COCA, SoftmaxRegression, balanced_accuracy, coca_confusion, colour_descriptor, combine_sims, decide_prob,  # noqa: E402
+from src.embeddings.experiments import (COCA, coca_confusion, colour_descriptor, combine_sims, decide_prob,  # noqa: E402
                                         full_metrics, loso, prob_features, top1_on_known, tune_prob)
 from src.embeddings.id_metrics import outcome_counts  # noqa: E402
 from src.embeddings.identify import AUTO, REVIEW, UNKNOWN, cosine_matrix, decide, features_from_sims, tune  # noqa: E402
@@ -276,19 +277,19 @@ def main() -> int:
                 accs = []
                 for s in sorted(set(s_store)):
                     tr, te = s_store != s, s_store == s
-                    m = SoftmaxRegression(c).fit(xtr[tr], y[tr], len(classes))
+                    m = LinearClassifier.fit(xtr[tr], y[tr], classes, c)
                     accs.append((m.predict_proba(xtr[te]).argmax(axis=1) == y[te]).mean())
                 scores[c] = float(np.mean(accs))
             best_c = max(scores, key=lambda c: (round(scores[c], 6), -c))
             print(f"{label}: leave-one-TRAIN-store-out accuracy on the shelf entries by C: " + ", ".join(f"{c}: {100 * a:.1f}%" for c, a in scores.items()) + f" -> C = {best_c}")
-            model = SoftmaxRegression(best_c).fit(xtr, y, len(classes))
+            model = LinearClassifier.fit(xtr, y, classes, best_c)
             feat = prob_features(model.predict_proba(xva), x.products)
             tune_fn = lambda f, t: tune_prob(f, t, lc["t_grid"], x.idc["utility"])  # noqa: E731
             outcome, used = loso({"p": feat}, x.truth, x.stores, x.products, tune_fn, lambda f, th: decide_prob(f, th["t_unk"], th["t_auto"]))
             r = x.result(f"logreg {label}", feat, outcome, used)
             if label == "CLS":   # control: the same pipeline with the shelf labels shuffled must fall to chance, or something leaks
                 rng = np.random.default_rng(cfg["seed"])
-                shuf = SoftmaxRegression(best_c).fit(xtr, rng.permutation(y), len(classes))
+                shuf = LinearClassifier.fit(xtr, rng.permutation(y), classes, best_c)
                 sf = prob_features(shuf.predict_proba(xva), x.products)
                 known = np.isin(x.truth, x.products)
                 chance = float((np.array(x.products, dtype=object)[sf["top1"]][known] == x.truth[known]).mean())

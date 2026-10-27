@@ -1,7 +1,7 @@
 import numpy as np
 from PIL import Image
 
-from src.embeddings.experiments import (COCA, SoftmaxRegression, balanced_accuracy, coca_confusion, coca_variant_top1, colour_descriptor, combine_sims,
+from src.embeddings.experiments import (COCA, balanced_accuracy, coca_confusion, coca_variant_top1, colour_descriptor, combine_sims,
                                         decide_prob, loso, prob_features, tune_prob)
 
 CENTRE = {"x": [0.25, 0.75], "y": [0.30, 0.70]}
@@ -24,16 +24,6 @@ def test_colour_descriptor_looks_only_at_the_centre():
 def test_combined_similarity_stays_on_the_cosine_scale():
     a, b = np.array([[0.8]]), np.array([[0.4]])
     assert combine_sims(a, b, 0.0)[0, 0] == 0.8 and abs(combine_sims(a, b, 1.0)[0, 0] - 0.6) < 1e-9
-
-
-def test_softmax_regression_learns_separable_classes_and_balances_rare_ones():
-    rng = np.random.default_rng(0)
-    x = np.vstack([rng.normal(0, 1, (60, 5)) + [4, 0, 0, 0, 0], rng.normal(0, 1, (60, 5)) + [0, 4, 0, 0, 0], rng.normal(0, 1, (6, 5)) + [0, 0, 4, 0, 0]])
-    y = np.array([0] * 60 + [1] * 60 + [2] * 6)
-    m = SoftmaxRegression(c=1.0).fit(x, y, 3)
-    p = m.predict_proba(x)
-    assert np.allclose(p.sum(axis=1), 1) and balanced_accuracy(y, p.argmax(axis=1)) > 0.95
-    assert m.predict_proba(x[-6:]).argmax(axis=1).tolist() == [2] * 6      # the rare class is not swallowed by the big ones
 
 
 def test_probability_rules():

@@ -1,8 +1,7 @@
-"""Pieces of the Stage 6d experiments on separating the Coca-Cola variants: colour descriptor, a small logistic regression,
+"""Pieces of the Stage 6d experiments on separating the Coca-Cola variants: colour descriptor, probability rules,
 leave-one-store-out with a choice of option, and the variant metrics. All development numbers (agreement with the owner's labels).
 """
 import numpy as np
-import torch
 from PIL import Image
 
 from src.embeddings.id_metrics import summarize
@@ -30,39 +29,7 @@ def combine_sims(cls_sims: np.ndarray, colour_sims: np.ndarray, w: float) -> np.
     return (cls_sims + w * colour_sims) / (1.0 + w)
 
 
-# ---------------------------------------------------------------- logistic regression (no scikit-learn)
-class SoftmaxRegression:
-    """Multinomial logistic regression, L2 penalty, class-balanced weights: minimises 0.5 ||W||^2 + C * sum_i w_i CE_i (the
-    scikit-learn convention), with L-BFGS, in float64 on CPU. Features are standardised with the training statistics."""
-
-    def __init__(self, c: float = 1.0, max_iter: int = 300):
-        self.c, self.max_iter = c, max_iter
-
-    def fit(self, x: np.ndarray, y: np.ndarray, n_classes: int):
-        self.mu, self.sd = x.mean(axis=0), x.std(axis=0) + 1e-6
-        xt = torch.tensor((x - self.mu) / self.sd, dtype=torch.float64)
-        yt = torch.tensor(y, dtype=torch.long)
-        counts = torch.bincount(yt, minlength=n_classes).double()
-        wt = (len(y) / (max(1, int((counts > 0).sum())) * counts.clamp(min=1)))[yt]          # balanced: n / (k * n_class)
-        w = torch.zeros(x.shape[1], n_classes, dtype=torch.float64, requires_grad=True)
-        b = torch.zeros(n_classes, dtype=torch.float64, requires_grad=True)
-        opt = torch.optim.LBFGS([w, b], max_iter=self.max_iter, line_search_fn="strong_wolfe", tolerance_grad=1e-9, tolerance_change=1e-12)
-
-        def closure():
-            opt.zero_grad()
-            ce = torch.nn.functional.cross_entropy(xt @ w + b, yt, reduction="none")
-            loss = 0.5 * (w ** 2).sum() + self.c * (wt * ce).sum()
-            loss.backward()
-            return loss
-        opt.step(closure)
-        self.w, self.b = w.detach(), b.detach()
-        return self
-
-    def predict_proba(self, x: np.ndarray) -> np.ndarray:
-        xt = torch.tensor((x - self.mu) / self.sd, dtype=torch.float64)
-        return torch.softmax(xt @ self.w + self.b, dim=1).numpy()
-
-
+# ---------------------------------------------------------------- logistic regression helpers (the model itself: src/embeddings/classifier.py)
 def balanced_accuracy(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     return float(np.mean([(y_pred[y_true == c] == c).mean() for c in sorted(set(y_true))]))
 
