@@ -28,35 +28,53 @@ def cosine_matrix(a: np.ndarray, b: np.ndarray) -> np.ndarray:
 
 
 def features(queries: np.ndarray, catalog: np.ndarray, entry_product: np.ndarray, entry_photo: np.ndarray, products: list[str], k: int,
-             entry_mask: np.ndarray | None = None) -> dict:
+             entry_mask: np.ndarray | None = None, balance: bool = False) -> dict:
     """Features for (Q, D) unit-length queries against an (E, D) catalog. `entry_mask` (E,) keeps only some entries (for example the
     originals only, for the plain-catalog experiment)."""
     if entry_mask is not None:
         catalog, entry_product, entry_photo = catalog[entry_mask], entry_product[entry_mask], entry_photo[entry_mask]
-    return features_from_sims(cosine_matrix(queries, catalog), entry_product, entry_photo, products, k)
+    return features_from_sims(cosine_matrix(queries, catalog), entry_product, entry_photo, products, k, balance)
 
 
-def features_from_sims(sims: np.ndarray, entry_product: np.ndarray, entry_photo: np.ndarray, products: list[str], k: int) -> dict:
-    """Same features from a ready (Q, E) cosine similarity matrix (for example one filled from the database search)."""
+def features_from_sims(sims: np.ndarray, entry_product: np.ndarray, entry_photo: np.ndarray, products: list[str], k: int,
+                       balance: bool = False) -> dict:
+    """Same features from a ready (Q, E) cosine similarity matrix (for example one filled from the database search).
+
+    Catalog entries with the product id `unknown` are NEGATIVE examples (shelf crops the owner labeled unknown): they never become the
+    answer, but `neg_gap` (best negative similarity minus the top-1 product similarity) lets a rule send a crop that sits closer to a
+    known other brand than to any target product to `unknown`, and they take part in the k-NN vote. A product with no entry gets
+    similarity -1 (it can never win). With `balance`, each neighbour in the vote counts 1 / (number of entries of its product), so a
+    product with many entries does not win the vote just because it has more of them."""
     photos = sorted(set(entry_photo))
     photo_sim = np.stack([sims[:, entry_photo == p].max(axis=1) for p in photos], axis=1)          # (Q, P)
     photo_product = np.array([entry_product[entry_photo == p][0] for p in photos])
-    prod_sim = np.stack([photo_sim[:, photo_product == p].max(axis=1) for p in products], axis=1)  # (Q, n products)
+    no_entry = np.full(len(sims), -1.0)
+    prod_sim = np.stack([photo_sim[:, photo_product == p].max(axis=1) if (photo_product == p).any() else no_entry for p in products], axis=1)
+    neg = photo_product == "unknown"
+    neg_sim = photo_sim[:, neg].max(axis=1) if neg.any() else None
     order = np.argsort(-prod_sim, axis=1)
     top1 = order[:, 0]
     top1_sim = prod_sim[np.arange(len(top1)), top1]
     second = prod_sim[np.arange(len(top1)), order[:, 1]]
     nearest = np.argsort(-photo_sim, axis=1)[:, :k]
-    vote = np.array([(photo_product[nearest[i]] == products[top1[i]]).mean() for i in range(len(top1))])
+    weight = np.ones(len(photos))
+    if balance:
+        sizes = {p: int((photo_product == p).sum()) for p in set(photo_product)}
+        weight = np.array([1.0 / sizes[p] for p in photo_product])
+    vote = np.array([(weight[nearest[i]] * (photo_product[nearest[i]] == products[top1[i]])).sum() / weight[nearest[i]].sum() for i in range(len(top1))])
+    neg_gap = neg_sim - top1_sim if neg_sim is not None else np.full(len(top1), -np.inf)
     return {"products": products, "prod_sim": prod_sim, "top1": top1, "top1_sim": top1_sim, "margin": top1_sim - second, "vote": vote,
-            "top3": order[:, :3]}
+            "top3": order[:, :3], "neg_gap": neg_gap}
 
 
-def decide(feat: dict, t_sim: float, t_margin: float, t_vote: float) -> np.ndarray:
-    """Outcome per query: automatic, review or unknown."""
+def decide(feat: dict, t_sim: float, t_margin: float, t_vote: float, t_neg: float | None = None) -> np.ndarray:
+    """Outcome per query: automatic, review or unknown. With `t_neg` (and negative catalog entries), a crop that is closer to a
+    negative example than to its top-1 product by more than t_neg is also unknown."""
     out = np.full(len(feat["top1"]), AUTO, dtype=object)
     out[(feat["vote"] < t_vote) | (feat["margin"] < t_margin)] = REVIEW
     out[feat["top1_sim"] < t_sim] = UNKNOWN
+    if t_neg is not None:
+        out[feat["neg_gap"] > t_neg] = UNKNOWN
     return out
 
 
@@ -80,12 +98,14 @@ def grid_values(cfg_grid: dict) -> tuple[list, list, list]:
 def tune(feat: dict, truth: np.ndarray, cfg: dict) -> dict:
     """Thresholds with the best mean utility on the given crops (ties: the first in grid order, i.e. the lowest thresholds)."""
     sims, margins, votes = grid_values(cfg["grid"])
+    # t_neg is tuned only when the catalog has negative entries (the first value, 9.0, means "rule off": it wins ties)
+    negs = list(cfg["grid"].get("neg_gap", [9.0])) if np.isfinite(feat["neg_gap"]).any() else [None]
     products = np.array(feat["products"])[feat["top1"]]
     best, best_u = None, -1e9
-    for ts, tm, tv in itertools.product(sims, margins, votes):
-        u = utility(decide(feat, ts, tm, tv), products, truth, cfg["utility"])
+    for ts, tm, tv, tn in itertools.product(sims, margins, votes, negs):
+        u = utility(decide(feat, ts, tm, tv, tn), products, truth, cfg["utility"])
         if u > best_u + 1e-12:
-            best, best_u = {"t_sim": float(ts), "t_margin": float(tm), "t_vote": float(tv)}, u
+            best, best_u = {"t_sim": float(ts), "t_margin": float(tm), "t_vote": float(tv), "t_neg": None if tn is None else float(tn)}, u
     return {**best, "utility": best_u}
 
 
@@ -104,6 +124,6 @@ def leave_one_store_out(feat: dict, truth: np.ndarray, stores: np.ndarray, cfg: 
         tune_idx = np.where(labeled & (stores != s) & ~np.isin(stores, list(tune_exclude_stores)))[0]
         th = tune(subset(feat, tune_idx), truth[tune_idx], cfg)
         test_idx = np.where(stores == s)[0]
-        outcome[test_idx] = decide(subset(feat, test_idx), th["t_sim"], th["t_margin"], th["t_vote"])
+        outcome[test_idx] = decide(subset(feat, test_idx), th["t_sim"], th["t_margin"], th["t_vote"], th["t_neg"])
         used.append({"store": s, **th})
     return outcome, used
