@@ -137,3 +137,13 @@ demo:                                           # scripts/demo_identify.py: a sm
   hash_cache: data/id_maps/content_hashes.csv   # gitignored: sha256 of every raw photo (and the pHash of the test photos), to refuse test photos
   colours: {automatic: [0, 170, 0], review: [235, 180, 0], unknown: [128, 128, 128], candidates: [40, 110, 230]}   # candidates = brand + variants, or a short list of products (blue)
   panel: {column_width_px: 560, max_photo_height_px: 1700, font_px: 30, max_columns: 3}
+experiments:                                    # Stage 6d: three experiments on separating the Coca-Cola variants (reference: catalog (b), CLS, 10% margin)
+  sam2: {model_id: facebook/sam2.1-hiera-small, revision: ee5bba1d82bb8749febdf90f45e84b687142ba03, cache_dir: models/hf_cache}   # Apache-2.0
+  results_dir: data/results/stage6d             # gitignored: cached embeddings and results
+  colour:                                       # 4a: HSV histogram of the central part of the crop (where the label is)
+    centre: {x: [0.25, 0.75], y: [0.30, 0.70]}  # share of the crop width / height
+    bins: {h: 12, s: 3, v: 3}                   # joint histogram, square root (Hellinger), unit length: cosine similarity
+    weights: [0.0, 0.25, 0.5, 1.0, 2.0, 4.0]     # combined score (cls + w * colour) / (1 + w); w tuned leaving one store out on top-1 of known crops
+  logreg:                                       # 4c: multinomial logistic regression on the shelf entries (no scikit-learn: it is not installed, a small torch version is used)
+    c_grid: [0.1, 1.0, 10.0, 100.0]             # inverse L2 strength, chosen by leave-one-TRAIN-store-out on the shelf entries
+    t_grid: {start: 0.30, stop: 0.95, step: 0.05}

@@ -152,6 +152,13 @@ python scripts/evaluate_shelf_catalog.py         # (a) originals vs +shelf, (b) 
 python scripts/evaluate_answer_types.py [--catalog originals|originals+shelf|originals+shelf+negatives|shelf]   # candidate list (conformal) and two-level answer vs the current rules
 ```
 
+Stage 6d, variant experiments (inside `soda-poc`; development numbers on the 180 labeled val crops, catalog (b) as the reference; SAM 2 `facebook/sam2.1-hiera-small`, Apache-2.0, weights in models/hf_cache):
+
+```bash
+python scripts/sam2_timing.py                    # SAM 2 speed on MPS (0.2 to 0.5 s per photo)
+python scripts/run_stage6d.py [--exp all|colour|context|logreg]   # 4a colour descriptor, 4b 0% margin and SAM 2 masks, 4c logistic regression (small torch version, no scikit-learn); keep-rules in reports/stage_06d.md
+```
+
 OCR trial (decision input only; the ONE exception to "everything runs in soda-poc": it runs in the throwaway conda env `ocr-trial`, never in soda-poc; EasyOCR, python-bidi (LGPL) and pytesseract are accepted for the trial only and are never added to requirements.txt or the pipeline):
 
 ```bash
