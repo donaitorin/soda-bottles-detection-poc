@@ -129,6 +129,15 @@ python scripts/evaluate_identification.py        # development numbers on the la
 python scripts/diagnose_domain_gap.py            # diagnostic (in memory only): domain gap, degraded catalog
 ```
 
+Demo tool (inside `soda-poc`; try the current system on one photo; a developer tool, not an evaluation):
+
+```bash
+python scripts/demo_identify.py --image data/demo/inputs/photo.jpg [--out PATH] [--t-sim X --t-margin Y --t-vote Z]
+# frcnn_v2 epoch_12 at score 0.3 -> 10% margin crops -> DINOv2 CLS -> search in soda_catalog -> Stage 6b unknown rules. Output (ignored): data/demo/outputs/<id or file name>_identified.jpg and .json
+# green = automatic, yellow = review, grey = unknown. The thresholds in configs/stage6.yaml `demo.thresholds` are DEMO thresholds, not an evaluation result (re-tune with scripts/tune_demo_thresholds.py).
+# Test-split photos are REFUSED (content hash compared with the raw test photos); raw file names are never printed: a dataset photo is named by its anonymous id. Needs the Postgres container and python scripts/build_catalog.py.
+```
+
 OCR trial (decision input only; the ONE exception to "everything runs in soda-poc": it runs in the throwaway conda env `ocr-trial`, never in soda-poc; EasyOCR, python-bidi (LGPL) and pytesseract are accepted for the trial only and are never added to requirements.txt or the pipeline):
 
 ```bash
