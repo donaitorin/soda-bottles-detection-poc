@@ -107,7 +107,7 @@ def main() -> int:
         if times:
             print(f"time per crop (Label Studio lead_time): median {times[len(times) // 2]:.1f} s, total {sum(times) / 60:.1f} min")
         nb = counts["not_a_bottle"]
-        print(f"not_a_bottle: {nb} of {n} ({100 * nb / n:.1f}%) -> pseudo-label precision on val about {100 * (n - nb) / n:.1f}% "
+        print(f"not_a_bottle: {nb} of {n} ({100 * nb / n:.1f}%) -> pseudo-label precision in this sample about {100 * (n - nb) / n:.1f}% "
               f"(share of boxes that are bottles; a sample estimate, says nothing about missed bottles)")
         if counts["unknown"] < le["min_unknown_warning"]:
             print(f"WARNING: only {counts['unknown']} unknown crops (under {le['min_unknown_warning']}): add a targeted batch of crops from photos with other brands "

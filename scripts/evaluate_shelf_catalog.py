@@ -87,6 +87,16 @@ def main() -> int:
     for p in products:
         print(f"| {p} | {runs['a']['per_product'].get(p, 0)} | {pct((truth[known] == p).mean())}% | {pct((runs['a']['top1'][known] == p).mean())}% | {pct((raw['top1'][known] == p).mean())}% |")
 
+    print("\nTop-1 correct per product (COUNTS of known val crops; a percentage only from 10 crops), and where the wrong ones go with originals + shelf:")
+    print("| Product | Crops | originals | originals+shelf | wrong ones go to (originals+shelf) |\n|---|---:|---:|---:|---|")
+    for p in products:
+        sel = np.where(truth == p)[0]
+        wrong = Counter(runs["a"]["top1"][i] for i in sel if runs["a"]["top1"][i] != p)
+        print(f"| {p} | {len(sel)} | {int((runs['originals']['top1'][sel] == p).sum())} | {int((runs['a']['top1'][sel] == p).sum())} | " + (", ".join(f"{k} {v}" for k, v in wrong.most_common()) or "-") + " |")
+    nb = ((runs["a"]["outcome"] == "automatic") & np.isin(truth, products + ["unknown"])).sum()
+    ok = ((runs["a"]["outcome"] == "automatic") & (runs["a"]["top1"] == truth)).sum()
+    print(f"Automatic answers with originals + shelf: {int(nb)} labeled crops, {int(ok)} correct.")
+
     def compare(title, base, other):
         diff = difference_metric(runs[other]["fn"], runs[base]["fn"])
         dpoint, dci = diff(ids), bootstrap_by_store(store_of, diff, bs["n"], cfg["seed"], bs["level"])
