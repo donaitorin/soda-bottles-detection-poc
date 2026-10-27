@@ -17,6 +17,7 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
+from src.embeddings.answers import brand_info, calibrate_bm, conformal_delta, nonconformity  # noqa: E402
 from src.embeddings.identify import AUTO, REVIEW, UNKNOWN, decide, features, tune  # noqa: E402
 
 
@@ -40,6 +41,14 @@ def main() -> int:
     th = tune(sub, truth[labeled], idc)
     out = decide(feat, th["t_sim"], th["t_margin"], th["t_vote"])
     print(f"demo thresholds tuned on all {len(labeled)} labeled crops (products and unknown): {th}")
+    known = np.where(np.isin(truth, products))[0]
+    true_idx = np.array([products.index(truth[i]) for i in known])
+    delta = conformal_delta(nonconformity(feat["prod_sim"][known], true_idx), cfg["answers"]["coverage"])
+    brand_idx, margin, brands = brand_info(feat["prod_sim"][known], products, cfg["brands"])
+    true_brand = np.array([brands.index(cfg["brands"][truth[i]]) for i in known])
+    ac = cfg["answers"]
+    t_bm = calibrate_bm(margin, brand_idx == true_brand, ac["brand_margin_grid"], ac["brand_precision_target"], ac["min_answered"])
+    print(f"demo candidates calibrated on the {len(known)} known crops (optimistic): delta {delta:.4f}, t_bm {t_bm}  -> configs/stage6.yaml demo.candidates {{delta, t_bm, max_list}}")
     print("outcomes on ALL 180 crops with them (optimistic, tuned on the same crops): " + ", ".join(f"{k} {int((out == k).sum())}" for k in (AUTO, REVIEW, UNKNOWN)))
     return 0
 

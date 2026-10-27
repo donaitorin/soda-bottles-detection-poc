@@ -5,7 +5,7 @@ shelf crops of Stage 6b, DINOv2 CLS embeddings, search in the pgvector database 
 Stage 6b unknown rules with the DEMO thresholds of configs/stage6.yaml (tuned once on all 180 labeled val crops: NOT an evaluation
 result; with them the system answers nothing automatically, so expect yellow and grey boxes; --t-sim/--t-margin/--t-vote explore other values).
 
-Output: the photo with numbered boxes coloured by decision (green automatic, yellow review, grey unknown) and a side panel, plus a JSON
+Output: the photo with numbered boxes coloured by decision (green automatic, blue candidates = brand + variants or a short list, yellow review, grey unknown) and a side panel, plus a JSON
 with every box. Test-split photos are REFUSED (the input file's hash is compared with the raw photos of the test split). Raw photo file
 names (they hold store and uploader names) are never printed or written: a photo that is in the dataset is named by its anonymous id.
 
@@ -31,6 +31,7 @@ from src.data.images import load_image  # noqa: E402
 from src.data.paths import check_output_dir  # noqa: E402
 from src.detection.model import build_model  # noqa: E402
 from src.embeddings import catalog_db  # noqa: E402
+from src.embeddings.answers import CANDIDATES, candidate_sets, candidates_info, to_candidates, two_level  # noqa: E402
 from src.embeddings.crops import crop_box_with_margin  # noqa: E402
 from src.embeddings.demo import build_json, check_not_test, content_index, draw_result, file_sha256  # noqa: E402
 from src.embeddings.embed import embed, load_dinov2  # noqa: E402
@@ -106,7 +107,7 @@ def run(args) -> int:
     t_emb = time.perf_counter() - t2
 
     t3 = time.perf_counter()
-    decisions, top3s = [], []
+    decisions, top3s, cands = [], [], []
     if len(vecs):
         db = cfg["database"]
         try:
@@ -127,23 +128,31 @@ def run(args) -> int:
             for h in hs:
                 sims[qi, pos[h["id"]]] = h["similarity"]
         feat = features_from_sims(sims, entry_product, entry_photo, products, idc["top_k_photos"])
-        decisions = list(decide(feat, th["t_sim"], th["t_margin"], th["t_vote"]))
+        outcome = decide(feat, th["t_sim"], th["t_margin"], th["t_vote"])
+        # candidates (blue) replace review where there is something useful to say: brand + variants, or a short list
+        ca = dc["candidates"]
+        sets = candidate_sets(feat["prod_sim"], ca["delta"])
+        applies, variants = two_level(feat["prod_sim"], sets, products, cfg["brands"], ca["t_bm"])
+        final, kind = to_candidates(outcome, sets, applies, ca["max_list"])
+        decisions = list(final)
         for qi in range(len(vecs)):
             top3s.append([(products[j], float(feat["prod_sim"][qi, j])) for j in feat["top3"][qi]])
+            cands.append(candidates_info(feat["prod_sim"][qi], variants[qi] if kind[qi] == "brand" else sets[qi], kind[qi] == "brand", products, cfg["brands"])
+                         if final[qi] == CANDIDATES else None)
     t_search = time.perf_counter() - t3
 
     title = image_name
-    canvas = draw_result(image, boxes, decisions, top3s, dc["colours"], dc["panel"], title)
+    canvas = draw_result(image, boxes, decisions, top3s, dc["colours"], dc["panel"], title, cands, dc["names"])
     canvas.save(out_img, quality=90)
-    counts = {k: decisions.count(k) for k in (AUTO, REVIEW, UNKNOWN)}
+    counts = {k: decisions.count(k) for k in (AUTO, CANDIDATES, REVIEW, UNKNOWN)}
     result = build_json(image_name, image.size, boxes, scores, decisions, top3s,
                         {"pipeline": {"detector": f"frcnn_v2 {Path(dc['detector']['checkpoint']).name}", "operating_score": dc["detector"]["operating_score"],
                                       "height_floor": pcfg["filters"]["min_height_fraction"], "crop_margin": 0.10, "embedding": ec["model_id"] + " CLS",
-                                      "catalog": f"{cfg['database']['name']} (originals)", "thresholds": th,
+                                      "catalog": f"{cfg['database']['name']} (originals)", "thresholds": th, "candidates": dc["candidates"],
                                       "note": "DEMO thresholds, tuned once on the labeled val crops: not an evaluation result"},
-                         "decisions": counts, "seconds": {"load_models_and_warm_up": round(t_load, 2), "detection": round(t_det, 3), "embeddings": round(t_emb, 3), "search_and_rules": round(t_search, 3)}})
+                         "decisions": counts, "seconds": {"load_models_and_warm_up": round(t_load, 2), "detection": round(t_det, 3), "embeddings": round(t_emb, 3), "search_and_rules": round(t_search, 3)}}, cands)
     out_json.write_text(json.dumps(result, indent=1))
-    print(f"{len(boxes)} boxes: automatic {counts[AUTO]}, review {counts[REVIEW]}, unknown {counts[UNKNOWN]}")
+    print(f"{len(boxes)} boxes: automatic {counts[AUTO]}, candidates {counts[CANDIDATES]}, review {counts[REVIEW]}, unknown {counts[UNKNOWN]}")
     print(f"timing on {device}: load models + warm-up {t_load:.1f} s (once) | detection {t_det:.2f} s | embeddings {t_emb:.2f} s ({len(crops)} crops) | database search + rules {t_search:.2f} s")
     print(f"image: {out_img.relative_to(REPO_ROOT) if out_img.is_relative_to(REPO_ROOT) else out_img.name}\njson:  {out_json.relative_to(REPO_ROOT) if out_json.is_relative_to(REPO_ROOT) else out_json.name}")
     return 0

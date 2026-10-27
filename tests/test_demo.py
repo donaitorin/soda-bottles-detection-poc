@@ -6,7 +6,8 @@ from PIL import Image
 
 from src.embeddings.demo import build_json, check_not_test, content_index, decision_colour, draw_result, file_sha256, panel_entry
 
-COLOURS = {"automatic": [0, 170, 0], "review": [235, 180, 0], "unknown": [128, 128, 128]}
+COLOURS = {"automatic": [0, 170, 0], "review": [235, 180, 0], "unknown": [128, 128, 128], "candidates": [40, 110, 230]}
+NAMES = {"coca": "Coca-Cola", "coca_zero": "zero", "coca_classic": "classic"}
 PANEL = {"column_width_px": 400, "max_photo_height_px": 600, "font_px": 20}
 TOP3 = [("coca_zero", 0.83), ("coca_classic", 0.80), ("sprite", 0.52)]
 
@@ -86,3 +87,24 @@ def test_the_hash_cache_is_reused_and_rebuilt_when_the_photo_count_changes(tmp_p
     names["s03_cccccccc"] = "real store name_c.jpg"
     (tmp_path / "real store name_c.jpg").write_bytes(b"c" * 30)
     assert len(content_index(tmp_path, names, cache)) == 3
+
+
+def test_candidates_have_their_own_colour_and_panel_text():
+    assert decision_colour("candidates", COLOURS) == (40, 110, 230)
+    brand = {"kind": "brand", "brand": "coca", "items": [("coca_zero", 0.83), ("coca_classic", 0.80)]}
+    assert panel_entry(6, "candidates", TOP3, brand, NAMES) == ["#6  Coca-Cola: which one?", "   zero  0.83", "   classic  0.80"]
+    lst = {"kind": "list", "brand": "coca", "items": [("coca_zero", 0.83), ("sprite", 0.80)]}
+    assert panel_entry(7, "candidates", TOP3, lst, NAMES) == ["#7  one of:", "   zero  0.83", "   sprite  0.80"]
+
+
+def test_drawing_and_json_with_candidates():
+    img = Image.new("RGB", (400, 800), (255, 255, 255))
+    boxes = np.array([[20, 100, 100, 300], [150, 100, 230, 300]], float)
+    c = {"kind": "brand", "brand": "coca", "items": [("coca_zero", 0.83), ("coca_classic", 0.80)]}
+    out = draw_result(img, boxes, ["candidates", "review"], [TOP3] * 2, COLOURS, PANEL, "demo", [c, None], NAMES)
+    px = out.getpixel((int(21 * 0.75), int(200 * 0.75)))
+    assert px[2] > 180 and px[0] < 100                                   # box 1 is blue
+    j = build_json("x", (400, 800), boxes, np.array([0.9, 0.8]), ["candidates", "review"], [TOP3] * 2, {}, [c, None])
+    assert j["boxes"][0]["candidates"] == {"kind": "brand", "brand": "coca", "items": [{"product": "coca_zero", "similarity": 0.83}, {"product": "coca_classic", "similarity": 0.8}]}
+    assert "candidates" not in j["boxes"][1]
+    json.dumps(j)

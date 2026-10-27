@@ -11,6 +11,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
+from src.embeddings.answers import CANDIDATES
 from src.embeddings.identify import AUTO, REVIEW, UNKNOWN
 
 
@@ -50,11 +51,19 @@ def decision_colour(decision: str, colours: dict) -> tuple:
     return tuple(colours[decision])
 
 
-def panel_entry(n: int, decision: str, top3: list[tuple[str, float]]) -> list[str]:
-    """Text lines for one box: automatic shows the product and its similarity, review the top 3 products with their similarities,
-    unknown the top-1 product and similarity that was rejected."""
+def short_name(product: str, names: dict) -> str:
+    return names.get(product, product)
+
+
+def panel_entry(n: int, decision: str, top3: list[tuple[str, float]], candidates: dict | None = None, names: dict | None = None) -> list[str]:
+    """Text lines for one box: automatic shows the product and its similarity, candidates the brand and its variants (or a short list)
+    with similarities, review the top 3 products with their similarities, unknown the top-1 product and similarity that was rejected."""
+    names = names or {}
     if decision == AUTO:
         return [f"#{n}  {top3[0][0]}  {top3[0][1]:.2f}"]
+    if decision == CANDIDATES:
+        head = f"#{n}  {names.get(candidates['brand'], candidates['brand'])}: which one?" if candidates["kind"] == "brand" else f"#{n}  one of:"
+        return [head] + [f"   {short_name(p, names)}  {s:.2f}" for p, s in candidates["items"]]
     if decision == REVIEW:
         return [f"#{n}  review"] + [f"   {i}. {p}  {s:.2f}" for i, (p, s) in enumerate(top3, 1)]
     return [f"#{n}  unknown", f"   rejected: {top3[0][0]}  {top3[0][1]:.2f}"]
@@ -65,7 +74,7 @@ def _font(px: int):
 
 
 def draw_result(image: Image.Image, boxes: np.ndarray, decisions: list[str], top3s: list[list[tuple[str, float]]], colours: dict,
-                panel_cfg: dict, title: str) -> Image.Image:
+                panel_cfg: dict, title: str, candidates: list | None = None, names: dict | None = None) -> Image.Image:
     """The photo with every box numbered and coloured by decision (green automatic, yellow review, grey unknown), and a side panel
     (legend first, then one entry per number). Large type so it reads on a phone; a long panel is split into columns."""
     px, col_w, max_h = panel_cfg["font_px"], panel_cfg["column_width_px"], panel_cfg["max_photo_height_px"]
@@ -83,8 +92,10 @@ def draw_result(image: Image.Image, boxes: np.ndarray, decisions: list[str], top
         d.text((x1 + 3, y1 + 1), label, fill=(0, 0, 0), font=font)
 
     pfont, line_h = _font(px), int(px * 1.25)
-    legend = [(AUTO, "automatic (answer given)"), (REVIEW, "review (a person decides)"), (UNKNOWN, "unknown (rejected)")]
-    entries = [panel_entry(n, dec, t3) for n, (dec, t3) in enumerate(zip(decisions, top3s), 1)]
+    legend = [(AUTO, "automatic (answer given)")] + ([(CANDIDATES, "candidates (brand or short list)")] if CANDIDATES in colours else []) + [
+        (REVIEW, "review (a person decides)"), (UNKNOWN, "unknown (rejected)")]
+    candidates = candidates or [None] * len(decisions)
+    entries = [panel_entry(n, dec, t3, c, names) for n, (dec, t3, c) in enumerate(zip(decisions, top3s, candidates), 1)]
     head_h = line_h * (2 + len(legend)) + 10
     heights = [len(e) * line_h + 8 for e in entries]
     max_cols = panel_cfg.get("max_columns", 3)
@@ -121,8 +132,14 @@ def draw_result(image: Image.Image, boxes: np.ndarray, decisions: list[str], top
     return canvas
 
 
-def build_json(image_name: str, size: tuple[int, int], boxes: np.ndarray, scores: np.ndarray, decisions: list[str], top3s: list, meta: dict) -> dict:
-    return {"image": image_name, "image_size_wh": list(size), **meta,
-            "boxes": [{"id": n, "box_xyxy": [round(float(v), 1) for v in b], "detector_score": round(float(s), 4), "decision": dec,
-                       "top3": [{"product": p, "similarity": round(float(v), 4)} for p, v in t3]}
-                      for n, (b, s, dec, t3) in enumerate(zip(boxes, scores, decisions, top3s), 1)]}
+def build_json(image_name: str, size: tuple[int, int], boxes: np.ndarray, scores: np.ndarray, decisions: list[str], top3s: list, meta: dict,
+               candidates: list | None = None) -> dict:
+    candidates = candidates or [None] * len(decisions)
+    out = []
+    for n, (b, s, dec, t3, c) in enumerate(zip(boxes, scores, decisions, top3s, candidates), 1):
+        box = {"id": n, "box_xyxy": [round(float(v), 1) for v in b], "detector_score": round(float(s), 4), "decision": dec,
+               "top3": [{"product": p, "similarity": round(float(v), 4)} for p, v in t3]}
+        if c is not None:
+            box["candidates"] = {"kind": c["kind"], "brand": c["brand"], "items": [{"product": p, "similarity": round(float(v), 4)} for p, v in c["items"]]}
+        out.append(box)
+    return {"image": image_name, "image_size_wh": list(size), **meta, "boxes": out}
