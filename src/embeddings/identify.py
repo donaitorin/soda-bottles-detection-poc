@@ -33,7 +33,11 @@ def features(queries: np.ndarray, catalog: np.ndarray, entry_product: np.ndarray
     originals only, for the plain-catalog experiment)."""
     if entry_mask is not None:
         catalog, entry_product, entry_photo = catalog[entry_mask], entry_product[entry_mask], entry_photo[entry_mask]
-    sims = cosine_matrix(queries, catalog)                       # cosine similarity (Q, E)
+    return features_from_sims(cosine_matrix(queries, catalog), entry_product, entry_photo, products, k)
+
+
+def features_from_sims(sims: np.ndarray, entry_product: np.ndarray, entry_photo: np.ndarray, products: list[str], k: int) -> dict:
+    """Same features from a ready (Q, E) cosine similarity matrix (for example one filled from the database search)."""
     photos = sorted(set(entry_photo))
     photo_sim = np.stack([sims[:, entry_photo == p].max(axis=1) for p in photos], axis=1)          # (Q, P)
     photo_product = np.array([entry_product[entry_photo == p][0] for p in photos])
