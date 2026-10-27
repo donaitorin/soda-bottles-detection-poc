@@ -63,3 +63,11 @@ def test_targeted_pick_uses_retrieval_rank_caps_and_does_not_repeat_crops():
         i = cands.index((pid, k, _))
         assert products.index(name) in np.argsort(-sim[i])[:2]
     assert got == pick_targeted(cands, sim, products, ["a", "b"], 5, 2, 2, 6, {("s01_p0", 0)})   # deterministic
+
+
+def test_contact_sheet_pagination_and_size():
+    from PIL import Image
+    from src.embeddings.sheets import contact_sheet, paginate
+    assert [len(p) for p in paginate(list(range(45)), 20)] == [20, 20, 5]
+    sheet = contact_sheet([Image.new("RGB", (50, 200), (200, 0, 0))] * 7, [f"c{i}" for i in range(7)], "t", cols=5, cell=(100, 150))
+    assert sheet.width == 500 and sheet.height > 2 * 150            # 2 rows of 150 px cells plus captions and title
