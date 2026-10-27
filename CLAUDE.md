@@ -132,9 +132,9 @@ python scripts/diagnose_domain_gap.py            # diagnostic (in memory only): 
 Demo tool (inside `soda-poc`; try the current system on one photo; a developer tool, not an evaluation):
 
 ```bash
-python scripts/demo_identify.py --image data/demo/inputs/photo.jpg [--out PATH] [--t-sim X --t-margin Y --t-vote Z --t-neg W]
-# frcnn_v2 epoch_12 at score 0.3 -> 10% margin crops -> DINOv2 CLS -> search in soda_catalog (catalog (b): 30 originals + owner-labeled TRAIN shelf entries + unknown negatives, 193 rows) -> Stage 6b unknown rules + negatives + candidates.
-# Photos of the TRAIN split are optimistic in the demo: their own crops are in the catalog. Use val photos or photos that are not in the dataset. Output (ignored): data/demo/outputs/<id or file name>_identified.jpg and .json
+python scripts/demo_identify.py --image data/demo/inputs/photo.jpg [--out PATH] [--scorer classifier|catalog] [--t-unk X --t-auto Y | --t-sim X --t-margin Y --t-vote Z --t-neg W]
+# frcnn_v2 epoch_12 at score 0.3 -> 10% margin crops -> DINOv2 CLS -> the ADOPTED classifier (logistic regression, models/stage6; needs `python scripts/fit_classifier.py`) -> automatic / candidates / review / unknown. `--scorer catalog` is the fallback: search in soda_catalog (catalog (b), 193 rows; needs the Postgres container) with the Stage 6b rules.
+# Photos of the TRAIN split are optimistic in the demo (the classifier was trained on their crops, and they are in catalog (b)); the tool prints a NOTE. Use val photos or photos that are not in the dataset. Output (ignored): data/demo/outputs/<id or file name>_identified.jpg and .json
 # green = automatic, yellow = review, grey = unknown. The thresholds in configs/stage6.yaml `demo.thresholds` are DEMO thresholds, not an evaluation result (re-tune with scripts/tune_demo_thresholds.py).
 # Test-split photos are REFUSED (content hash compared with the raw test photos); raw file names are never printed: a dataset photo is named by its anonymous id. Needs the Postgres container and python scripts/build_catalog.py.
 ```
@@ -156,7 +156,16 @@ Stage 6d, variant experiments (inside `soda-poc`; development numbers on the 180
 
 ```bash
 python scripts/sam2_timing.py                    # SAM 2 speed on MPS (0.2 to 0.5 s per photo)
-python scripts/run_stage6d.py [--exp all|colour|context|logreg]   # 4a colour descriptor, 4b 0% margin and SAM 2 masks, 4c logistic regression (small torch version, no scikit-learn); keep-rules in reports/stage_06d.md
+python scripts/run_stage6d.py [--exp all|colour|context|logreg]   # 4a colour descriptor, 4b 0% margin and SAM 2 masks, 4c logistic regression (scikit-learn); keep-rules in reports/stage_06d.md
+```
+
+Stage 6 close-out: the ADOPTED scorer (logistic regression on the CLS embedding, scikit-learn BSD-3; inside `soda-poc`):
+
+```bash
+python scripts/fit_classifier.py                 # fit ONCE on all labeled TRAIN shelf entries -> models/stage6/logreg_cls.npz + logreg_cls_card.json (training counts, labels-file hash, C, seed, thresholds, date); prints the demo thresholds to copy into configs/stage6.yaml demo.classifier (optimistic)
+python scripts/make_error_sheets.py              # contact sheets of the val crops the classifier gets wrong, grouped true -> predicted -> data/review/stage6d_errors/ (ignored)
+python scripts/evaluate_answer_types.py --scorer classifier   # candidate lists from the classifier's probabilities (same 90% coverage target, leave one store out)
+python scripts/evaluate_stage6_gate.py           # the Stage 6 gate with the adopted scorer: brand, top-3, unknown handling, named confusions (development numbers)
 ```
 
 OCR trial (decision input only; the ONE exception to "everything runs in soda-poc": it runs in the throwaway conda env `ocr-trial`, never in soda-poc; EasyOCR, python-bidi (LGPL) and pytesseract are accepted for the trial only and are never added to requirements.txt or the pipeline):

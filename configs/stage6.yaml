@@ -130,6 +130,7 @@ demo:                                           # scripts/demo_identify.py: a sm
   # `candidates` (blue) replaces `review` where there is something useful to say: the brand and its variants (two-level answer, brand margin >= t_bm) or a
   # list of at most max_list products within `delta` of the top-1. delta and t_bm come from scripts/tune_demo_thresholds.py (all 86 known val crops: optimistic). Retuned for catalog (b) at Stage 6c.
   candidates: {delta: 0.0505, t_bm: 0.03, max_list: 3, brand_answers: false}   # brand_answers false = owner decision (Stage 6c): no brand + variants answer, only short lists
+  classifier: {thresholds: {t_unk: 0.3, t_auto: 0.75}, candidates: {delta: 0.4526, max_list: 3}, list_source: probability}   # from scripts/fit_classifier.py (OPTIMISTIC: tuned once on all 180 val crops, not an evaluation). The adopted scorer; candidate lists from its probabilities (Stage 6d rule: mean size 2.62 against 3.69 for the similarity list, coverage 91.9% against 90.7%); `--scorer catalog` uses demo.thresholds above
   names: {coca: Coca-Cola, sprite: Sprite, fanta: Fanta, coca_classic: classic, coca_classic_returnable: returnable, coca_zero: zero, coca_light: light}   # short names for the panel
   detector: {checkpoint: models/stage5/frcnn_v2/epoch_12.pt, operating_score: 0.30}   # the last epoch of frcnn_v2 at the operating score; raw output plus the 1.5% height floor
   input_dir: data/demo/inputs                   # gitignored (data/**)
@@ -147,3 +148,6 @@ experiments:                                    # Stage 6d: three experiments on
   logreg:                                       # 4c: multinomial logistic regression on the shelf entries (no scikit-learn: it is not installed, a small torch version is used)
     c_grid: [0.1, 1.0, 10.0, 100.0]             # inverse L2 strength, chosen by leave-one-TRAIN-store-out on the shelf entries
     t_grid: {start: 0.30, stop: 0.95, step: 0.05}
+classifier:                                     # the ADOPTED scorer (Stage 6d decision of the owner): logistic regression on the CLS embedding, scikit-learn
+  model_dir: models/stage6                      # gitignored (models/): logreg_cls.npz + logreg_cls_card.json (training data, hash of the labels file, C, seed, thresholds, date)
+  name: logreg_cls
