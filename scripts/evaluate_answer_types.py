@@ -23,6 +23,8 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from src.data.paths import check_output_dir  # noqa: E402
 from src.embeddings.answers import CANDIDATES, calibrate_by_store, candidate_sets, list_metrics, to_candidates, two_level  # noqa: E402
+from src.embeddings.classifier import LinearClassifier  # noqa: E402
+from src.embeddings.experiments import decide_prob, prob_features, loso, tune_prob  # noqa: E402
 from src.embeddings.eval_data import load_originals, load_shelf, load_val_queries  # noqa: E402
 from src.embeddings.identify import AUTO, REVIEW, UNKNOWN, features, leave_one_store_out  # noqa: E402
 from src.embeddings.shelf_catalog import MODES, assemble  # noqa: E402
@@ -39,18 +41,25 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default="configs/stage6.yaml")
     parser.add_argument("--catalog", default="originals", choices=MODES)
+    parser.add_argument("--scorer", default="catalog", choices=["catalog", "classifier"], help="classifier: the saved logistic regression (models/stage6); the lists are then built from its probabilities, no brand answers")
     args = parser.parse_args()
     cfg = yaml.safe_load((REPO_ROOT / args.config).read_text())
     s1 = yaml.safe_load((REPO_ROOT / "configs/stage1.yaml").read_text())
     protected = [REPO_ROOT / d for d in s1["protected_dirs"]]
     products, idc, brand_of, ac, bs, sc = cfg["products"], cfg["identify"], cfg["brands"], cfg["answers"], cfg["bootstrap"], cfg["shelf_round"]["catalog"]
-    print(f"ALL NUMBERS BELOW ARE {NOTE.upper()}. Catalog: {args.catalog}.\n")
+    print(f"ALL NUMBERS BELOW ARE {NOTE.upper()}. " + (f"Catalog: {args.catalog}." if args.scorer == "catalog" else "Scorer: logistic regression on CLS (probabilities).") + "\n")
     val, orig = load_val_queries(cfg, REPO_ROOT), load_originals(cfg, REPO_ROOT)
     truth, stores, ids = val["truth"], val["stores"], list(val["crop_ids"])
-    shelf = load_shelf(cfg, REPO_ROOT) if args.catalog != "originals" else None
-    cat = assemble(orig, shelf, args.catalog, sc["cap_per_product"], sc["cap_unknown"], cfg["seed"])
-    feat = features(val["vec"], cat["vec"], cat["product"], cat["photo"], products, idc["top_k_photos"], balance=sc["balance_vote"] and args.catalog != "originals")
-    outcome, _ = leave_one_store_out(feat, truth, stores, idc)
+    if args.scorer == "classifier":
+        model = LinearClassifier.load(REPO_ROOT / cfg["classifier"]["model_dir"] / f"{cfg['classifier']['name']}.npz")
+        feat = prob_features(model.predict_proba(val["vec"]), products)
+        lc = cfg["experiments"]["logreg"]
+        outcome, _ = loso({"p": feat}, truth, stores, products, lambda f, t: tune_prob(f, t, lc["t_grid"], idc["utility"]), lambda f, th: decide_prob(f, th["t_unk"], th["t_auto"]))
+    else:
+        shelf = load_shelf(cfg, REPO_ROOT) if args.catalog != "originals" else None
+        cat = assemble(orig, shelf, args.catalog, sc["cap_per_product"], sc["cap_unknown"], cfg["seed"])
+        feat = features(val["vec"], cat["vec"], cat["product"], cat["photo"], products, idc["top_k_photos"], balance=sc["balance_vote"] and args.catalog != "originals")
+        outcome, _ = leave_one_store_out(feat, truth, stores, idc)
     prod_sim = feat["prod_sim"]
     cal = calibrate_by_store(prod_sim, truth, stores, products, brand_of, ac)
 
@@ -59,7 +68,7 @@ def main() -> int:
     for s in sorted(set(stores)):
         i = np.where(stores == s)[0]
         sets[i] = candidate_sets(prod_sim[i], cal[s]["delta"])
-        applies[i], variants[i] = two_level(prod_sim[i], sets[i], products, brand_of, cal[s]["t_bm"])
+        applies[i], variants[i] = two_level(prod_sim[i], sets[i], products, brand_of, cal[s]["t_bm"] if args.scorer == "catalog" else float("inf"))
     known = np.isin(truth, products)
     true_idx = np.array([products.index(t) if t in products else 0 for t in truth])
     print("Calibration per held-out store (on the other stores' known crops): " + "; ".join(
@@ -119,10 +128,10 @@ def main() -> int:
             inside = f"{ok} of {len(cs)}"
         print(f"| {name} | {len(sel)} | {c[AUTO]} | {cb} | {cl_} | {c[REVIEW]} | {c[UNKNOWN]} | {inside} |")
         summary[name] = {"n": len(sel), **{k: int(c[k]) for k in cols}, "brand": cb, "list": cl_}
-    out = REPO_ROOT / "data/results/stage6b_answers" / f"results_{args.catalog.replace('+', '_')}.json"
+    out = REPO_ROOT / "data/results/stage6b_answers" / (f"results_{args.catalog.replace('+', '_')}.json" if args.scorer == "catalog" else "results_classifier.json")
     check_output_dir(out.parent, protected)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps({"note": NOTE, "catalog": args.catalog, "calibration": cal, "lists": {k: list_metrics(m[k_ids], true_idx[k_ids], products, brand_of) for k, m in methods.items()}, "mix": summary}, indent=1, default=float))
+    out.write_text(json.dumps({"note": NOTE, "catalog": args.catalog, "scorer": args.scorer, "calibration": cal, "lists": {k: list_metrics(m[k_ids], true_idx[k_ids], products, brand_of) for k, m in methods.items()}, "mix": summary}, indent=1, default=float))
     print(f"\nresults written to {out.relative_to(REPO_ROOT)} (gitignored)")
     return 0
 

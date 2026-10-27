@@ -1,9 +1,9 @@
 """Try the CURRENT system on one photo (a small developer tool, not an evaluation).
 
 Pipeline: frcnn_v2 last epoch at the operating score 0.3 (raw output plus the 1.5% height floor), the same 10% margin crops as the
-shelf crops of Stage 6b, DINOv2 CLS embeddings, search in the pgvector database `soda_catalog` (catalog (b): the 30 originals + owner-labeled train shelf entries + unknown negatives), then the
-Stage 6b unknown rules with the DEMO thresholds of configs/stage6.yaml (tuned once on all 180 labeled val crops: NOT an evaluation
-result; with them the system answers nothing automatically, so expect yellow and grey boxes; --t-sim/--t-margin/--t-vote explore other values).
+shelf crops of Stage 6b, DINOv2 CLS embeddings, then the ADOPTED scorer (logistic regression on the CLS embedding, models/stage6; `--scorer catalog` is the fallback: search in the pgvector database `soda_catalog`, catalog (b), with the Stage 6b rules), with the DEMO thresholds of configs/stage6.yaml (tuned once on all 180 labeled val crops: NOT an evaluation
+result; --t-unk/--t-auto explore other probability thresholds, --t-sim/--t-margin/--t-vote/--t-neg those of the catalog scorer).
+TRAIN photos are optimistic here: the classifier was trained on crops of the train photos (and they are in the catalog (b) of the fallback scorer).
 
 Output: the photo with numbered boxes coloured by decision (green automatic, blue candidates = brand + variants or a short list, yellow review, grey unknown) and a side panel, plus a JSON
 with every box. Test-split photos are REFUSED (the input file's hash is compared with the raw photos of the test split). Raw photo file
@@ -33,6 +33,8 @@ from src.detection.model import build_model  # noqa: E402
 from src.embeddings import catalog_db  # noqa: E402
 from src.embeddings.answers import CANDIDATES, candidate_sets, candidates_info, to_candidates, two_level  # noqa: E402
 from src.embeddings.crops import crop_box_with_margin  # noqa: E402
+from src.embeddings.classifier import LinearClassifier  # noqa: E402
+from src.embeddings.experiments import decide_prob, prob_features  # noqa: E402
 from src.embeddings.demo import build_json, check_not_test, content_index, draw_result, file_sha256  # noqa: E402
 from src.embeddings.embed import embed, load_dinov2  # noqa: E402
 from src.embeddings.identify import AUTO, REVIEW, UNKNOWN, decide, features_from_sims  # noqa: E402
@@ -63,19 +65,27 @@ def run(args) -> int:
         raise SystemExit("Input file not found.")                     # no path in the message: it could be a raw photo
     names = {r["photo_id"]: r["file_name"] for r in csv.DictReader((REPO_ROOT / s1["id_maps_dir"] / "photo_ids.csv").open())}
     test_ids = {l.strip() for l in (REPO_ROOT / s1["splits"]["dir"] / "test.txt").read_text().split("\n") if l.strip()}
+    train_ids = {l.strip() for l in (REPO_ROOT / s1["splits"]["dir"] / "train.txt").read_text().split("\n") if l.strip()}
     index = content_index(REPO_ROOT / s1["raw_dir"], names, REPO_ROOT / dc["hash_cache"])
     pid = check_not_test(file_sha256(path), index, test_ids)           # exits with the anonymous id if it is a test photo
     image_name = pid or path.name
+    train_warning = "TRAIN photo: the classifier was trained on crops of the train photos (and they are in catalog (b)), so this result is optimistic; use a val photo or a photo that is not in the dataset" if pid in train_ids else None
+    if train_warning:
+        print("NOTE: " + train_warning)
     stem = Path(image_name).stem
     out_img = Path(args.out) if args.out else REPO_ROOT / dc["output_dir"] / f"{stem}_identified.jpg"
     check_output_dir(out_img.parent, protected)
     out_img.parent.mkdir(parents=True, exist_ok=True)
     out_json = out_img.with_suffix(".json")
-    th = {"t_sim": args.t_sim if args.t_sim is not None else dc["thresholds"]["t_sim"],
-          "t_margin": args.t_margin if args.t_margin is not None else dc["thresholds"]["t_margin"],
-          "t_vote": args.t_vote if args.t_vote is not None else dc["thresholds"]["t_vote"],
-          "t_neg": args.t_neg if args.t_neg is not None else dc["thresholds"].get("t_neg")}
-    print(f"photo: {image_name} ({'dataset photo' if pid else 'not in the dataset'}) | thresholds {th} (DEMO thresholds, not an evaluation result)")
+    cc = dc["classifier"]
+    if args.scorer == "classifier":
+        th = {"t_unk": args.t_unk if args.t_unk is not None else cc["thresholds"]["t_unk"], "t_auto": args.t_auto if args.t_auto is not None else cc["thresholds"]["t_auto"]}
+    else:
+        th = {"t_sim": args.t_sim if args.t_sim is not None else dc["thresholds"]["t_sim"],
+              "t_margin": args.t_margin if args.t_margin is not None else dc["thresholds"]["t_margin"],
+              "t_vote": args.t_vote if args.t_vote is not None else dc["thresholds"]["t_vote"],
+              "t_neg": args.t_neg if args.t_neg is not None else dc["thresholds"].get("t_neg")}
+    print(f"photo: {image_name} ({'dataset photo' if pid else 'not in the dataset'}) | scorer {args.scorer} | thresholds {th} (DEMO thresholds, not an evaluation result)")
 
     device = get_device()
     t0 = time.perf_counter()
@@ -84,6 +94,14 @@ def run(args) -> int:
     det.load_state_dict(state["model"])
     det.eval().to(device)
     dino = load_dinov2(ec, device, REPO_ROOT)
+    classifier, classifier_card = None, None
+    if args.scorer == "classifier":
+        mpath = REPO_ROOT / cfg["classifier"]["model_dir"] / f"{cfg['classifier']['name']}.npz"
+        if not mpath.exists():
+            raise SystemExit(f"Classifier not found ({mpath.relative_to(REPO_ROOT)}): run python scripts/fit_classifier.py first, or use --scorer catalog.")
+        classifier = LinearClassifier.load(mpath)
+        card = json.loads(mpath.with_name(mpath.stem + "_card.json").read_text())
+        classifier_card = {"date_utc": card["date_utc"], "C": card["settings"]["C"], "n_crops": card["training_data"]["n_crops"], "labels_file_sha256": card["training_data"]["labels_file_sha256"][:12]}
     warm = Image.new("RGB", (320, 320), (128, 128, 128))              # first calls on MPS include one-time setup: do it before timing
     frcnn.detect(det, 1, warm, device)
     embed(dino, [warm, warm], device, {**ec, "batch_size": 2})
@@ -110,35 +128,50 @@ def run(args) -> int:
     t3 = time.perf_counter()
     decisions, top3s, cands = [], [], []
     if len(vecs):
-        db = cfg["database"]
-        try:
-            conn = catalog_db.connect(db, REPO_ROOT, db["name"])
-        except Exception as error:  # noqa: BLE001
-            raise SystemExit(f"Cannot reach the catalog database {db['name']} ({type(error).__name__}). Is the Postgres container running (docker compose up -d postgres) and is it built (python scripts/build_catalog.py)?")
-        try:
-            hits = [catalog_db.search(conn, v, 1000) for v in vecs]
-        finally:
-            conn.close()
-        entry_ids = sorted(h["id"] for h in hits[0])
-        pos = {e: i for i, e in enumerate(entry_ids)}
-        meta = {h["id"]: h for h in hits[0]}
-        entry_product = np.array([meta[e]["product_id"] for e in entry_ids])
-        entry_photo = np.array([meta[e]["source_photo"] for e in entry_ids])
-        sims = np.zeros((len(vecs), len(entry_ids)), np.float32)
-        for qi, hs in enumerate(hits):
-            for h in hs:
-                sims[qi, pos[h["id"]]] = h["similarity"]
-        feat = features_from_sims(sims, entry_product, entry_photo, products, idc["top_k_photos"], balance=cfg["shelf_round"]["catalog"]["balance_vote"])
-        outcome = decide(feat, th["t_sim"], th["t_margin"], th["t_vote"], th["t_neg"])
-        # candidates (blue) replace review where there is something useful to say: brand + variants, or a short list
-        ca = dc["candidates"]
-        sets = candidate_sets(feat["prod_sim"], ca["delta"])
-        applies, variants = two_level(feat["prod_sim"], sets, products, cfg["brands"], ca["t_bm"] if ca.get("brand_answers", True) else float("inf"))
-        final, kind = to_candidates(outcome, sets, applies, ca["max_list"])
+        def catalog_features():
+            """Features from the database search (catalog (b)): the fallback scorer, and the similarity candidate lists."""
+            db = cfg["database"]
+            try:
+                conn = catalog_db.connect(db, REPO_ROOT, db["name"])
+            except Exception as error:  # noqa: BLE001
+                raise SystemExit(f"Cannot reach the catalog database {db['name']} ({type(error).__name__}). Is the Postgres container running (docker compose up -d postgres) and is it built (python scripts/build_catalog.py)?")
+            try:
+                hits = [catalog_db.search(conn, v, 1000) for v in vecs]
+            finally:
+                conn.close()
+            entry_ids = sorted(h["id"] for h in hits[0])
+            pos = {e: i for i, e in enumerate(entry_ids)}
+            meta = {h["id"]: h for h in hits[0]}
+            entry_product = np.array([meta[e]["product_id"] for e in entry_ids])
+            entry_photo = np.array([meta[e]["source_photo"] for e in entry_ids])
+            sims = np.zeros((len(vecs), len(entry_ids)), np.float32)
+            for qi, hs in enumerate(hits):
+                for h in hs:
+                    sims[qi, pos[h["id"]]] = h["similarity"]
+            return features_from_sims(sims, entry_product, entry_photo, products, idc["top_k_photos"], balance=cfg["shelf_round"]["catalog"]["balance_vote"])
+
+        if args.scorer == "classifier":
+            # adopted scorer: logistic regression on the CLS embedding (probabilities over 6 products + unknown)
+            feat = prob_features(classifier.predict_proba(vecs), products)
+            outcome = decide_prob(feat, th["t_unk"], th["t_auto"])
+            if cc["list_source"] == "probability":
+                lfeat, delta = feat, cc["candidates"]["delta"]
+            else:                                        # similarity lists from the database (Stage 6d rule chose probability lists; this is the other option)
+                lfeat, delta = catalog_features(), dc["candidates"]["delta"]
+            max_list = cc["candidates"]["max_list"]
+            brand_off = True
+        else:
+            feat = lfeat = catalog_features()
+            outcome = decide(feat, th["t_sim"], th["t_margin"], th["t_vote"], th["t_neg"])
+            delta, max_list, brand_off = dc["candidates"]["delta"], dc["candidates"]["max_list"], not dc["candidates"].get("brand_answers", True)
+        # candidates (blue) replace review where there is something useful to say: a short list (brand + variants only with the catalog scorer and brand_answers on)
+        sets = candidate_sets(lfeat["prod_sim"], delta)
+        applies, variants = two_level(lfeat["prod_sim"], sets, products, cfg["brands"], float("inf") if brand_off else dc["candidates"]["t_bm"])
+        final, kind = to_candidates(outcome, sets, applies, max_list)
         decisions = list(final)
         for qi in range(len(vecs)):
             top3s.append([(products[j], float(feat["prod_sim"][qi, j])) for j in feat["top3"][qi]])
-            cands.append(candidates_info(feat["prod_sim"][qi], variants[qi] if kind[qi] == "brand" else sets[qi], kind[qi] == "brand", products, cfg["brands"])
+            cands.append(candidates_info(lfeat["prod_sim"][qi], variants[qi] if kind[qi] == "brand" else sets[qi], kind[qi] == "brand", products, cfg["brands"])
                          if final[qi] == CANDIDATES else None)
     t_search = time.perf_counter() - t3
 
@@ -149,12 +182,14 @@ def run(args) -> int:
     result = build_json(image_name, image.size, boxes, scores, decisions, top3s,
                         {"pipeline": {"detector": f"frcnn_v2 {Path(dc['detector']['checkpoint']).name}", "operating_score": dc["detector"]["operating_score"],
                                       "height_floor": pcfg["filters"]["min_height_fraction"], "crop_margin": 0.10, "embedding": ec["model_id"] + " CLS",
-                                      "catalog": f"{cfg['database']['name']} ({'originals + shelf entries + unknown negatives' if cfg['catalog'].get('use_shelf') else 'originals'})", "thresholds": th, "candidates": dc["candidates"],
-                                      "note": "DEMO thresholds, tuned once on the labeled val crops: not an evaluation result"},
+                                      "scorer": args.scorer, "scores_are": "probabilities (6 products + unknown)" if args.scorer == "classifier" else "cosine similarities to catalog (b)",
+                                      "model_card": classifier_card, "candidate_lists": cc["list_source"] if args.scorer == "classifier" else "similarity", "thresholds": th,
+                                      "candidates": cc["candidates"] if args.scorer == "classifier" else dc["candidates"],
+                                      "note": "DEMO thresholds, tuned once on the labeled val crops: not an evaluation result", "warning": train_warning},
                          "decisions": counts, "seconds": {"load_models_and_warm_up": round(t_load, 2), "detection": round(t_det, 3), "embeddings": round(t_emb, 3), "search_and_rules": round(t_search, 3)}}, cands)
     out_json.write_text(json.dumps(result, indent=1))
     print(f"{len(boxes)} boxes: automatic {counts[AUTO]}, candidates {counts[CANDIDATES]}, review {counts[REVIEW]}, unknown {counts[UNKNOWN]}")
-    print(f"timing on {device}: load models + warm-up {t_load:.1f} s (once) | detection {t_det:.2f} s | embeddings {t_emb:.2f} s ({len(crops)} crops) | database search + rules {t_search:.2f} s")
+    print(f"timing on {device}: load models + warm-up {t_load:.1f} s (once) | detection {t_det:.2f} s | embeddings {t_emb:.2f} s ({len(crops)} crops) | scoring + rules {t_search:.2f} s")
     print(f"image: {out_img.relative_to(REPO_ROOT) if out_img.is_relative_to(REPO_ROOT) else out_img.name}\njson:  {out_json.relative_to(REPO_ROOT) if out_json.is_relative_to(REPO_ROOT) else out_json.name}")
     return 0
 
@@ -164,6 +199,9 @@ def main() -> int:
     parser.add_argument("--image", required=True, help="the photo (any path; test-split photos are refused)")
     parser.add_argument("--out", help="output image path (default: data/demo/outputs/<id or file name>_identified.jpg); the JSON is written next to it")
     parser.add_argument("--config", default="configs/stage6.yaml")
+    parser.add_argument("--scorer", default="classifier", choices=["classifier", "catalog"], help="classifier (adopted: logistic regression on CLS) or catalog (the database search of Stage 6b/6c, the fallback)")
+    parser.add_argument("--t-unk", type=float, help="classifier: unknown if the top product's probability is below this")
+    parser.add_argument("--t-auto", type=float, help="classifier: automatic if the top product's probability is at least this")
     parser.add_argument("--t-sim", type=float, help="override the demo top-1 similarity threshold")
     parser.add_argument("--t-margin", type=float, help="override the demo margin threshold")
     parser.add_argument("--t-vote", type=float, help="override the demo vote threshold")
