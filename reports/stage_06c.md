@@ -58,3 +58,7 @@ python scripts/export_crop_labels.py --ls-export data/labelstudio/exports/crop_t
 python scripts/evaluate_shelf_catalog.py
 for c in originals originals+shelf originals+shelf+negatives shelf; do python scripts/evaluate_answer_types.py --catalog $c; done
 ```
+
+## 6. Catalog (b) in the database and the demo (owner decision after this report)
+`python scripts/build_catalog.py` now loads catalog (b) (`catalog.use_shelf: true`): the 30 originals, 163 capped shelf entries and the unknown negatives, **193 rows** (classic 30, returnable 30, zero 26, light 22, sprite 30, fanta 15, unknown 40); shelf entries are stored with their anonymous crop id and the source "train shelf crop (owner label)". `python scripts/check_catalog_db.py`: 180 val crops searched in Postgres against the offline search of the same catalog: **0 disagreements**. Rerun `build_catalog.py` after any label correction. The Stage 6b database check inside `evaluate_identification.py` is skipped (it compared against the 30 originals).
+Demo thresholds were retuned once on all 180 val crops for catalog (b) (optimistic, not an evaluation): `t_sim 0.65, t_margin 0.08, t_vote 0.8, t_neg 0.0` (utility 0.268), candidates `delta 0.0505, max_list 3`, brand answers off (owner). On the 180 crops with them: automatic 1, review 93, unknown 86. Demo, val photo (78 boxes): automatic 0, candidates 23, review 28, unknown 27; train photo (63 boxes): 0, 9, 5, 49 (optimistic: its own crops are in the catalog). The balanced vote is used in the demo.

@@ -132,8 +132,9 @@ python scripts/diagnose_domain_gap.py            # diagnostic (in memory only): 
 Demo tool (inside `soda-poc`; try the current system on one photo; a developer tool, not an evaluation):
 
 ```bash
-python scripts/demo_identify.py --image data/demo/inputs/photo.jpg [--out PATH] [--t-sim X --t-margin Y --t-vote Z]
-# frcnn_v2 epoch_12 at score 0.3 -> 10% margin crops -> DINOv2 CLS -> search in soda_catalog -> Stage 6b unknown rules. Output (ignored): data/demo/outputs/<id or file name>_identified.jpg and .json
+python scripts/demo_identify.py --image data/demo/inputs/photo.jpg [--out PATH] [--t-sim X --t-margin Y --t-vote Z --t-neg W]
+# frcnn_v2 epoch_12 at score 0.3 -> 10% margin crops -> DINOv2 CLS -> search in soda_catalog (catalog (b): 30 originals + owner-labeled TRAIN shelf entries + unknown negatives, 193 rows) -> Stage 6b unknown rules + negatives + candidates.
+# Photos of the TRAIN split are optimistic in the demo: their own crops are in the catalog. Use val photos or photos that are not in the dataset. Output (ignored): data/demo/outputs/<id or file name>_identified.jpg and .json
 # green = automatic, yellow = review, grey = unknown. The thresholds in configs/stage6.yaml `demo.thresholds` are DEMO thresholds, not an evaluation result (re-tune with scripts/tune_demo_thresholds.py).
 # Test-split photos are REFUSED (content hash compared with the raw test photos); raw file names are never printed: a dataset photo is named by its anonymous id. Needs the Postgres container and python scripts/build_catalog.py.
 ```
@@ -144,6 +145,9 @@ Stage 6c, second step (inside `soda-poc`; development numbers on the 180 labeled
 python scripts/check_pooling.py                  # mean pooling sanity check: padding share, cls vs mean vs mean_content
 python scripts/build_train_crop_round.py         # 300 TRAIN crops (200 random by store + 100 targeted for rare products) -> data/crops/train_shelf/{mapping.csv,tasks.json,candidate_embeddings.npz}; import tasks.json into the Label Studio project soda-bottles-crops-train, export JSON to data/labelstudio/exports/crop_train_shelf.json
 python scripts/export_crop_labels.py --ls-export data/labelstudio/exports/crop_train_shelf.json --name train_shelf   # -> data/annotations/crop_labels/train_shelf_labels.csv (val_sample_labels.csv untouched)
+python scripts/make_label_sheets.py              # contact sheets per label of the labeled TRAIN shelf entries -> data/review/train_shelf_labels/ (ignored), to spot mislabels; corrections as crop ids
+python scripts/build_catalog.py                  # rebuild the database after any label correction (catalog (b), catalog.use_shelf)
+python scripts/check_catalog_db.py               # database search vs offline search on the val crops, catalog (b)
 python scripts/evaluate_shelf_catalog.py         # (a) originals vs +shelf, (b) + unknown negatives, (c) shelf only; paired bootstrap by store
 python scripts/evaluate_answer_types.py [--catalog originals|originals+shelf|originals+shelf+negatives|shelf]   # candidate list (conformal) and two-level answer vs the current rules
 ```

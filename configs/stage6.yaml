@@ -46,6 +46,7 @@ catalog:
     no_box: whole_photo                        # no box: use the whole photo, and list the photo
     contact_sheet: {cell_px: 260}
     overrides: {"fanta/fanta_01.jpg": enclosing}   # the 2 boxes are the bottle and its base: after looking at the photo, use the box around both
+  use_shelf: true                              # DECISION of Stage 6c (owner): catalog (b) = the 30 originals + owner-labeled TRAIN shelf entries (capped, shelf_round.catalog) + the crops labeled unknown as negative entries (product_id unknown); rerun scripts/build_catalog.py after any label correction
   use_augmented: false                         # DECISION of Stage 6b: the augmented variants made identification WORSE on the labeled val crops (paired bootstrap by store), so the database holds the originals only; the augmented entries are still built for the experiments (embeddings.npz)
   augment:                                     # for the catalog augmentations of Stage 6b (about 5 to 6 per photo, applied to the bottle crop)
     per_photo: 6
@@ -124,11 +125,11 @@ shelf_round:                                    # second step: owner-labeled TRA
 demo:                                           # scripts/demo_identify.py: a small developer tool to try the current system on one photo
   # DEMO thresholds, NOT an evaluation result: tuned ONCE on all 180 labeled val crops (153 with a product or unknown label; no leave-one-store-out)
   # by scripts/tune_demo_thresholds.py, so any number computed with them on those crops is optimistic. They answer nothing automatically
-  # (the Stage 6b finding), so the demo shows review and unknown only; use --t-sim, --t-margin and --t-vote to explore other values.
-  thresholds: {t_sim: 0.475, t_margin: 0.05, t_vote: 0.0}
+  # (the Stage 6b finding; with catalog (b) almost nothing: 1 of 180), so the demo shows review, candidates and unknown; use --t-sim, --t-margin, --t-vote and --t-neg to explore other values.
+  thresholds: {t_sim: 0.65, t_margin: 0.08, t_vote: 0.8, t_neg: 0.0}
   # `candidates` (blue) replaces `review` where there is something useful to say: the brand and its variants (two-level answer, brand margin >= t_bm) or a
-  # list of at most max_list products within `delta` of the top-1. delta and t_bm come from scripts/tune_demo_thresholds.py (all 86 known val crops: optimistic).
-  candidates: {delta: 0.0206, t_bm: 0.03, max_list: 3}
+  # list of at most max_list products within `delta` of the top-1. delta and t_bm come from scripts/tune_demo_thresholds.py (all 86 known val crops: optimistic). Retuned for catalog (b) at Stage 6c.
+  candidates: {delta: 0.0505, t_bm: 0.03, max_list: 3, brand_answers: false}   # brand_answers false = owner decision (Stage 6c): no brand + variants answer, only short lists
   names: {coca: Coca-Cola, sprite: Sprite, fanta: Fanta, coca_classic: classic, coca_classic_returnable: returnable, coca_zero: zero, coca_light: light}   # short names for the panel
   detector: {checkpoint: models/stage5/frcnn_v2/epoch_12.pt, operating_score: 0.30}   # the last epoch of frcnn_v2 at the operating score; raw output plus the 1.5% height floor
   input_dir: data/demo/inputs                   # gitignored (data/**)
