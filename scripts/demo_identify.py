@@ -1,7 +1,7 @@
 """Try the CURRENT system on one photo (a small developer tool, not an evaluation).
 
 Pipeline: frcnn_v2 last epoch at the operating score 0.3 (raw output plus the 1.5% height floor), the same 10% margin crops as the
-shelf crops of Stage 6b, DINOv2 CLS embeddings, search in the pgvector database `soda_catalog` (the 30 catalog originals), then the
+shelf crops of Stage 6b, DINOv2 CLS embeddings, search in the pgvector database `soda_catalog` (catalog (b): the 30 originals + owner-labeled train shelf entries + unknown negatives), then the
 Stage 6b unknown rules with the DEMO thresholds of configs/stage6.yaml (tuned once on all 180 labeled val crops: NOT an evaluation
 result; with them the system answers nothing automatically, so expect yellow and grey boxes; --t-sim/--t-margin/--t-vote explore other values).
 
@@ -73,7 +73,8 @@ def run(args) -> int:
     out_json = out_img.with_suffix(".json")
     th = {"t_sim": args.t_sim if args.t_sim is not None else dc["thresholds"]["t_sim"],
           "t_margin": args.t_margin if args.t_margin is not None else dc["thresholds"]["t_margin"],
-          "t_vote": args.t_vote if args.t_vote is not None else dc["thresholds"]["t_vote"]}
+          "t_vote": args.t_vote if args.t_vote is not None else dc["thresholds"]["t_vote"],
+          "t_neg": args.t_neg if args.t_neg is not None else dc["thresholds"].get("t_neg")}
     print(f"photo: {image_name} ({'dataset photo' if pid else 'not in the dataset'}) | thresholds {th} (DEMO thresholds, not an evaluation result)")
 
     device = get_device()
@@ -127,12 +128,12 @@ def run(args) -> int:
         for qi, hs in enumerate(hits):
             for h in hs:
                 sims[qi, pos[h["id"]]] = h["similarity"]
-        feat = features_from_sims(sims, entry_product, entry_photo, products, idc["top_k_photos"])
-        outcome = decide(feat, th["t_sim"], th["t_margin"], th["t_vote"])
+        feat = features_from_sims(sims, entry_product, entry_photo, products, idc["top_k_photos"], balance=cfg["shelf_round"]["catalog"]["balance_vote"])
+        outcome = decide(feat, th["t_sim"], th["t_margin"], th["t_vote"], th["t_neg"])
         # candidates (blue) replace review where there is something useful to say: brand + variants, or a short list
         ca = dc["candidates"]
         sets = candidate_sets(feat["prod_sim"], ca["delta"])
-        applies, variants = two_level(feat["prod_sim"], sets, products, cfg["brands"], ca["t_bm"])
+        applies, variants = two_level(feat["prod_sim"], sets, products, cfg["brands"], ca["t_bm"] if ca.get("brand_answers", True) else float("inf"))
         final, kind = to_candidates(outcome, sets, applies, ca["max_list"])
         decisions = list(final)
         for qi in range(len(vecs)):
@@ -148,7 +149,7 @@ def run(args) -> int:
     result = build_json(image_name, image.size, boxes, scores, decisions, top3s,
                         {"pipeline": {"detector": f"frcnn_v2 {Path(dc['detector']['checkpoint']).name}", "operating_score": dc["detector"]["operating_score"],
                                       "height_floor": pcfg["filters"]["min_height_fraction"], "crop_margin": 0.10, "embedding": ec["model_id"] + " CLS",
-                                      "catalog": f"{cfg['database']['name']} (originals)", "thresholds": th, "candidates": dc["candidates"],
+                                      "catalog": f"{cfg['database']['name']} ({'originals + shelf entries + unknown negatives' if cfg['catalog'].get('use_shelf') else 'originals'})", "thresholds": th, "candidates": dc["candidates"],
                                       "note": "DEMO thresholds, tuned once on the labeled val crops: not an evaluation result"},
                          "decisions": counts, "seconds": {"load_models_and_warm_up": round(t_load, 2), "detection": round(t_det, 3), "embeddings": round(t_emb, 3), "search_and_rules": round(t_search, 3)}}, cands)
     out_json.write_text(json.dumps(result, indent=1))
@@ -166,6 +167,7 @@ def main() -> int:
     parser.add_argument("--t-sim", type=float, help="override the demo top-1 similarity threshold")
     parser.add_argument("--t-margin", type=float, help="override the demo margin threshold")
     parser.add_argument("--t-vote", type=float, help="override the demo vote threshold")
+    parser.add_argument("--t-neg", type=float, help="override the demo negative-gap threshold (unknown if a negative example is closer than the top-1 product by more than this)")
     args = parser.parse_args()
     try:
         return run(args)

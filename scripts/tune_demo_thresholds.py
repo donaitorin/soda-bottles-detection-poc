@@ -1,13 +1,12 @@
 """Tune the thresholds of the demo tool ONCE on all 180 labeled val crops (no leave-one-store-out) and print them.
 
 These are DEMO thresholds, not an evaluation result: they are tuned on the same crops they would be measured on, so any number computed
-with them on val is optimistic. Same utility and grid as the Stage 6b rules, plain catalog (30 originals), CLS embeddings.
+with them on val is optimistic. Same utility and grid as the Stage 6b rules; catalog (b) when `catalog.use_shelf` (originals + shelf entries + unknown negatives, as in the database), CLS embeddings.
 The values are then copied by hand into configs/stage6.yaml (`demo.thresholds`).
 
 Usage: python scripts/tune_demo_thresholds.py
 """
 import argparse
-import csv
 import sys
 from pathlib import Path
 
@@ -18,6 +17,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
 from src.embeddings.answers import brand_info, calibrate_bm, conformal_delta, nonconformity  # noqa: E402
+from src.embeddings.eval_data import load_originals, load_shelf, load_val_queries  # noqa: E402
+from src.embeddings.shelf_catalog import assemble  # noqa: E402
 from src.embeddings.identify import AUTO, REVIEW, UNKNOWN, decide, features, tune  # noqa: E402
 
 
@@ -27,19 +28,16 @@ def main() -> int:
     args = parser.parse_args()
     cfg = yaml.safe_load((REPO_ROOT / args.config).read_text())
     products, idc = cfg["products"], cfg["identify"]
-    labels = list(csv.DictReader((REPO_ROOT / cfg["labels_export"]["output_dir"] / "val_sample_labels.csv").open()))
-    crop_ids = np.array([r["crop_id"] for r in labels])
-    truth = np.array([r["label"] for r in labels], dtype=object)
-    z = np.load(REPO_ROOT / cfg["crops"]["mapping_dir"] / cfg["crops"]["sample"]["name"] / "embeddings.npz")
-    order = {c: i for i, c in enumerate(z["crop_ids"])}
-    q = z["cls"][[order[c] for c in crop_ids]]
-    cat = np.load(REPO_ROOT / cfg["catalog_files"]["embeddings_npz"])
-    orig = ~cat["is_augmented"]
-    feat = features(q, cat["cls"], cat["product"], cat["source_photo"], products, idc["top_k_photos"], orig)
+    val, orig = load_val_queries(cfg, REPO_ROOT), load_originals(cfg, REPO_ROOT)
+    truth, q = val["truth"], val["vec"]
+    sc = cfg["shelf_round"]["catalog"]
+    mode = "originals+shelf+negatives" if cfg["catalog"].get("use_shelf") else "originals"
+    cat = assemble(orig, load_shelf(cfg, REPO_ROOT) if mode != "originals" else None, mode, sc["cap_per_product"], sc["cap_unknown"], cfg["seed"])
+    feat = features(q, cat["vec"], cat["product"], cat["photo"], products, idc["top_k_photos"], balance=sc["balance_vote"] and mode != "originals")
     labeled = np.where(np.isin(truth, products + ["unknown"]))[0]
     sub = {k: (v[labeled] if isinstance(v, np.ndarray) else v) for k, v in feat.items()}
     th = tune(sub, truth[labeled], idc)
-    out = decide(feat, th["t_sim"], th["t_margin"], th["t_vote"])
+    out = decide(feat, th["t_sim"], th["t_margin"], th["t_vote"], th["t_neg"])
     print(f"demo thresholds tuned on all {len(labeled)} labeled crops (products and unknown): {th}")
     known = np.where(np.isin(truth, products))[0]
     true_idx = np.array([products.index(truth[i]) for i in known])
