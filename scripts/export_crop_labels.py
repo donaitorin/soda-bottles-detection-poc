@@ -6,6 +6,7 @@ PRECISION on val: the share of pseudo-label boxes that are not bottles; it says 
 there are too few `unknown` crops to calibrate the rejection rules (add a targeted batch then).
 
 Usage: python scripts/export_crop_labels.py --ls-export FILE [--name val_sample]
+       python scripts/export_crop_labels.py --ls-export FILE --name train_shelf     # the TRAIN round (separate project): writes train_shelf_labels.csv, val_sample_labels.csv is untouched
 """
 import argparse
 import csv
@@ -40,18 +41,19 @@ def main() -> int:
         check_output_dir(d, protected)
         d.mkdir(parents=True, exist_ok=True)
 
+    sample_names = args.name or [cfg["crops"]["sample"]["name"]]
     mapping = {}
-    for name in args.name or [cfg["crops"]["sample"]["name"]]:
+    for name in sample_names:
         with (REPO_ROOT / cfg["crops"]["mapping_dir"] / name / "mapping.csv").open() as f:
             for r in csv.DictReader(f):
                 mapping[r["crop_id"]] = {**r, "sample": name}
     src = Path(args.ls_export)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    shutil.copyfile(src, backup_dir / f"crop_ls_export_{stamp}.json")
+    shutil.copyfile(src, backup_dir / (f"crop_ls_export_{stamp}.json" if sample_names == [cfg["crops"]["sample"]["name"]] else f"crop_ls_export_{'_'.join(sample_names)}_{stamp}.json"))
     allowed = set(cfg["products"]) | set(cfg["other_labels"])
     labels, notes = read_crop_labels(json.loads(src.read_text()), cfg["label_studio"]["from_name"], allowed, set(mapping))
 
-    path = out_dir / "val_sample_labels.csv"
+    path = out_dir / f"{'_'.join(sample_names)}_labels.csv"
     with path.open("w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=["crop_id", "photo_id", "store_code", "sample", "label", "lead_time_s"])
         w.writeheader()
@@ -85,10 +87,21 @@ def main() -> int:
         print(f"| {store} | " + " | ".join(str(by_store[store][l]) for l in order) + f" | {sum(by_store[store].values())} |")
     few = [p for p in cfg["products"] if counts[p] < 5]
     if few:
-        print("LOW COUNT: fewer than 5 val crops for " + ", ".join(f"{p} ({counts[p]})" for p in few) + ": limits what can be concluded for them.")
+        print("LOW COUNT: fewer than 5 labeled crops for " + ", ".join(f"{p} ({counts[p]})" for p in few) + ": limits what can be concluded for them.")
     print(f"{n} of {len(mapping)} crops labeled; notes {dict(notes)}; backup copy in {backup_dir.relative_to(REPO_ROOT)}/; labels in {path.relative_to(REPO_ROOT)}")
     for label in cfg["products"] + cfg["other_labels"]:
         print(f"  {label}: {counts[label]}")
+    if n and any(m.get("batch") for m in mapping.values()):
+        print("\nlabels by how the crop was picked (the labeler did not see this):")
+        for batch in ("random", "targeted"):
+            c = Counter(v["label"] for cid, v in labels.items() if mapping[cid].get("batch") == batch)
+            print(f"  {batch} ({sum(c.values())}): " + ", ".join(f"{l} {c[l]}" for l in order))
+        tc = {}
+        for cid, v in labels.items():
+            if mapping[cid].get("batch") == "targeted":
+                tc.setdefault(mapping[cid]["targeted_for"], Counter())[v["label"]] += 1
+        for prod, c in tc.items():
+            print(f"  targeted for {prod}: {c[prod]} of {sum(c.values())} are really {prod}; the rest: " + ", ".join(f"{l} {k}" for l, k in c.most_common() if l != prod))
     if n:
         times = sorted(v["lead_time"] for v in labels.values() if v["lead_time"] is not None)
         if times:

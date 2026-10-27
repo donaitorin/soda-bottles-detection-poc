@@ -45,3 +45,21 @@ def test_sampling_is_reproducible_spread_over_photos_and_capped_per_photo():
 def test_the_per_photo_cap_limits_a_store_with_few_photos():
     cands = [("s01_p0", k, "s01") for k in range(50)]
     assert len(sample_crops(cands, {"s01": 20}, 8, seed=0)) == 8
+
+
+def test_targeted_pick_uses_retrieval_rank_caps_and_does_not_repeat_crops():
+    import numpy as np
+    from src.embeddings.crops import pick_targeted
+    products = ["a", "b", "c"]
+    cands = [(f"s01_p{p}", k, "s01") for p in range(3) for k in range(4)] + [("s02_q", k, "s02") for k in range(4)]
+    rng = np.random.default_rng(0)
+    sim = rng.random((len(cands), 3))
+    taken = {("s01_p0", 0)}
+    got = pick_targeted(cands, sim, products, ["a", "b"], per_product=5, top_rank=2, max_per_photo=2, max_per_store=6, taken=taken)
+    assert len({(p, k) for p, k, _, _ in got}) == len(got) and ("s01_p0", 0) not in {(p, k) for p, k, _, _ in got}
+    assert Counter(p for p, _, _, _ in got).most_common(1)[0][1] <= 2          # photo cap (s01_p0 already holds one)
+    assert Counter(s for _, _, s, _ in got)["s01"] <= 6                        # store cap
+    for pid, k, _, name in got:                                               # the product is among the crop's top 2
+        i = cands.index((pid, k, _))
+        assert products.index(name) in np.argsort(-sim[i])[:2]
+    assert got == pick_targeted(cands, sim, products, ["a", "b"], 5, 2, 2, 6, {("s01_p0", 0)})   # deterministic

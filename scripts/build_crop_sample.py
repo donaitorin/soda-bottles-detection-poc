@@ -26,18 +26,10 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from src.data.images import load_image  # noqa: E402
 from src.data.paths import check_output_dir  # noqa: E402
-from src.embeddings.crops import allocate_quota, crop_box_with_margin, crop_id, sample_crops  # noqa: E402
+from src.embeddings.crops import allocate_quota, crop_box_with_margin, crop_id, resize_for_display, sample_crops  # noqa: E402
 
 FIELDS = ["crop_id", "photo_id", "store_code", "box_index", "x1", "y1", "x2", "y2", "crop_x1", "crop_y1", "crop_x2", "crop_y2",
           "photo_width", "photo_height", "label_source", "score"]
-
-
-def resize_for_display(image: Image.Image, min_long: int, max_long: int) -> Image.Image:
-    long_side = max(image.size)
-    scale = min_long / long_side if long_side < min_long else (max_long / long_side if long_side > max_long else 1.0)
-    if scale == 1.0:
-        return image
-    return image.resize((max(1, round(image.width * scale)), max(1, round(image.height * scale))), Image.LANCZOS)
 
 
 def main() -> int:
