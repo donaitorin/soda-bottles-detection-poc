@@ -27,6 +27,8 @@ from src.data.paths import check_output_dir  # noqa: E402
 from src.embeddings import catalog_db  # noqa: E402
 from src.embeddings.augment import augment, seed_for  # noqa: E402
 from src.embeddings.embed import embed, load_dinov2  # noqa: E402
+from src.embeddings.eval_data import load_shelf  # noqa: E402
+from src.embeddings.shelf_catalog import shelf_db_entries  # noqa: E402
 
 
 def main() -> int:
@@ -87,7 +89,13 @@ def main() -> int:
         keep = [i for i, e in enumerate(entries) if cat["use_augmented"] or not e["is_augmented"]]
         if not cat["use_augmented"]:
             print("catalog.use_augmented is false: only the original crops go into the database (the augmented entries stay in embeddings.npz for the experiments)")
-        n = catalog_db.reload_entries(conn, [entries[i] for i in keep], cls_vecs[keep])
+        db_entries, db_vecs = [entries[i] for i in keep], cls_vecs[keep]
+        if cat.get("use_shelf"):
+            sc = cfg["shelf_round"]["catalog"]
+            shelf_entries, shelf_vecs = shelf_db_entries(load_shelf(cfg, REPO_ROOT), cfg["brands"], sc["cap_per_product"], sc["cap_unknown"], cfg["seed"])
+            db_entries, db_vecs = db_entries + shelf_entries, np.concatenate([db_vecs, shelf_vecs])
+            print(f"catalog.use_shelf is true: + {len(shelf_entries)} shelf entries from owner-labeled TRAIN crops (caps {sc['cap_per_product']} per product, {sc['cap_unknown']} unknown negatives)")
+        n = catalog_db.reload_entries(conn, db_entries, db_vecs)
         print(f"database {db['name']} ({'created' if created else 'existed'}): {n} rows loaded, cosine HNSW index; per product (originals, augmented): {catalog_db.counts(conn)}")
     finally:
         conn.close()

@@ -57,3 +57,15 @@ def test_balanced_vote_does_not_favour_the_product_with_more_entries():
     plain = features_from_sims(sims, prod, photo, PRODUCTS, 5)["vote"][0]
     bal = features_from_sims(sims, prod, photo, PRODUCTS, 5, balance=True)["vote"][0]
     assert abs(plain - 0.8) < 1e-9 and abs(bal - 0.5) < 1e-9
+
+
+def test_db_entries_match_the_assembled_catalog_and_hold_no_file_names():
+    from src.embeddings.shelf_catalog import shelf_db_entries
+    shelf = {"vec": _unit([[1, i + 1, 0] for i in range(12)]), "label": np.array(["a"] * 8 + ["unknown"] * 4, dtype=object),
+             "photo": np.array([f"s01_aaaaaaaa_{i:03d}" for i in range(12)])}
+    entries, vecs = shelf_db_entries(shelf, {"a": "brand_a"}, 5, 2, 0)
+    orig = {"vec": _unit([[1, 0, 0]]), "product": np.array(["a"]), "photo": np.array(["a/1"])}
+    cat = assemble(orig, shelf, "originals+shelf+negatives", 5, 2, 0)
+    assert len(entries) == len(vecs) == 7 and len(cat["product"]) == 8
+    assert sorted(e["source_photo"] for e in entries) == sorted(cat["photo"][1:])           # the same subset
+    assert {e["brand"] for e in entries} == {"brand_a", "unknown"} and all(not e["is_augmented"] for e in entries)

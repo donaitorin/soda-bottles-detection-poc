@@ -96,19 +96,22 @@ def main() -> int:
     main_name = "augmented catalog (210 entries)" if use_aug else "plain catalog (30 originals)"
     # ---- the database search agrees with the offline search
     db = cfg["database"]
-    conn = catalog_db.connect(db, REPO_ROOT, db["name"])
-    try:
-        bad = 0
-        in_db = np.ones(len(entry_product), bool) if main_mask is None else main_mask
-        sims = cosine_matrix(q["cls"], cat["cls"][in_db])
-        prod_in_db = entry_product[in_db]
-        for i in range(len(crop_ids)):
-            hit = catalog_db.search(conn, q["cls"][i], 1)[0]
-            j = int(np.argmax(sims[i]))
-            bad += not (hit["product_id"] == prod_in_db[j] and abs(hit["similarity"] - sims[i, j]) < 1e-3)
-        n_rows = conn.run("SELECT count(*) FROM catalog_entries")[0][0]
-    finally:
-        conn.close()
+    if cfg["catalog"].get("use_shelf"):   # since Stage 6c the database holds catalog (b), not the 30 originals this Stage 6b check compares against
+        bad, n_rows = "skipped (the database holds catalog (b))", "-"
+    else:
+        conn = catalog_db.connect(db, REPO_ROOT, db["name"])
+        try:
+            bad = 0
+            in_db = np.ones(len(entry_product), bool) if main_mask is None else main_mask
+            sims = cosine_matrix(q["cls"], cat["cls"][in_db])
+            prod_in_db = entry_product[in_db]
+            for i in range(len(crop_ids)):
+                hit = catalog_db.search(conn, q["cls"][i], 1)[0]
+                j = int(np.argmax(sims[i]))
+                bad += not (hit["product_id"] == prod_in_db[j] and abs(hit["similarity"] - sims[i, j]) < 1e-3)
+            n_rows = conn.run("SELECT count(*) FROM catalog_entries")[0][0]
+        finally:
+            conn.close()
     print(f"database check: {len(crop_ids)} queries searched in Postgres (soda_catalog, {n_rows} rows) vs the offline search: {bad} disagreement(s)\n")
 
     store_of = dict(zip(crop_ids, stores))

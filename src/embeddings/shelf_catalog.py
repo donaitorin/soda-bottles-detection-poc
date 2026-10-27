@@ -45,3 +45,13 @@ def assemble(orig: dict, shelf: dict, mode: str, cap: int, cap_unknown: int, see
         parts.append((shelf["vec"][kept], sel_label[kept], shelf["photo"][kept]))
     return {"vec": np.concatenate([p[0] for p in parts]), "product": np.concatenate([p[1] for p in parts]),
             "photo": np.concatenate([p[2] for p in parts])}
+
+
+def shelf_db_entries(shelf: dict, brand_of: dict, cap: int, cap_unknown: int, seed: int) -> tuple[list[dict], np.ndarray]:
+    """Database rows and vectors for the capped shelf entries of catalog (b): products and `unknown` negatives (the same subset
+    `assemble` picks). A shelf entry's `source_photo` is its anonymous crop id; its source is the owner's own labeling of a train crop."""
+    keep = capped_subset(shelf["label"], shelf["photo"], cap, cap_unknown, seed)
+    entries = [{"product_id": str(shelf["label"][i]), "brand": brand_of.get(shelf["label"][i], "unknown"), "size": None, "material": None,
+                "source_photo": str(shelf["photo"][i]), "source_url": "train shelf crop (owner label)", "license": "own photos (project data)",
+                "packaging_checked": "n/a", "is_augmented": False, "aug_index": None, "aug_params": None, "crop_method": "dino_box_margin10"} for i in keep]
+    return entries, shelf["vec"][keep]
