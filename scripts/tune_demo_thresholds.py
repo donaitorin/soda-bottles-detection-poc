@@ -1,0 +1,48 @@
+"""Tune the thresholds of the demo tool ONCE on all 180 labeled val crops (no leave-one-store-out) and print them.
+
+These are DEMO thresholds, not an evaluation result: they are tuned on the same crops they would be measured on, so any number computed
+with them on val is optimistic. Same utility and grid as the Stage 6b rules, plain catalog (30 originals), CLS embeddings.
+The values are then copied by hand into configs/stage6.yaml (`demo.thresholds`).
+
+Usage: python scripts/tune_demo_thresholds.py
+"""
+import argparse
+import csv
+import sys
+from pathlib import Path
+
+import numpy as np
+import yaml
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
+
+from src.embeddings.identify import AUTO, REVIEW, UNKNOWN, decide, features, tune  # noqa: E402
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--config", default="configs/stage6.yaml")
+    args = parser.parse_args()
+    cfg = yaml.safe_load((REPO_ROOT / args.config).read_text())
+    products, idc = cfg["products"], cfg["identify"]
+    labels = list(csv.DictReader((REPO_ROOT / cfg["labels_export"]["output_dir"] / "val_sample_labels.csv").open()))
+    crop_ids = np.array([r["crop_id"] for r in labels])
+    truth = np.array([r["label"] for r in labels], dtype=object)
+    z = np.load(REPO_ROOT / cfg["crops"]["mapping_dir"] / cfg["crops"]["sample"]["name"] / "embeddings.npz")
+    order = {c: i for i, c in enumerate(z["crop_ids"])}
+    q = z["cls"][[order[c] for c in crop_ids]]
+    cat = np.load(REPO_ROOT / cfg["catalog_files"]["embeddings_npz"])
+    orig = ~cat["is_augmented"]
+    feat = features(q, cat["cls"], cat["product"], cat["source_photo"], products, idc["top_k_photos"], orig)
+    labeled = np.where(np.isin(truth, products + ["unknown"]))[0]
+    sub = {k: (v[labeled] if isinstance(v, np.ndarray) else v) for k, v in feat.items()}
+    th = tune(sub, truth[labeled], idc)
+    out = decide(feat, th["t_sim"], th["t_margin"], th["t_vote"])
+    print(f"demo thresholds tuned on all {len(labeled)} labeled crops (products and unknown): {th}")
+    print("outcomes on ALL 180 crops with them (optimistic, tuned on the same crops): " + ", ".join(f"{k} {int((out == k).sum())}" for k in (AUTO, REVIEW, UNKNOWN)))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
