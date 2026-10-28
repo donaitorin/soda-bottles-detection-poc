@@ -12,6 +12,7 @@ from src.ocr.reader import require_ocr
 
 BRAND_WORDS = ("SPRITE", "FANTA")
 VARIANT_WORDS = ("LIGHT", "ZERO", "RETORNABLE")
+OTHER_BRAND_WORDS = ("BILZ", "PEPSI")                 # brands that must be `unknown`; exact whole words only (owner decision)
 KEYWORDS = ("COCA-COLA",) + VARIANT_WORDS + BRAND_WORDS
 _ZERO_GLUED = re.compile(r"^ZERO(AZUCAR(ES)?)?$")
 
@@ -31,19 +32,34 @@ def _similar(a: str, b: str, min_ratio: float) -> bool:
     return fuzz.ratio(a, b) / 100.0 >= min_ratio
 
 
-def keywords_read(text: str, min_ratio: float = 0.85) -> set[str]:
-    """The keywords found as whole words in the text (a set of KEYWORDS)."""
+def keywords_detail(text: str, min_ratio: float = 0.85, include_other: bool = True) -> dict[str, str]:
+    """{keyword: "exact" or "fuzzy"} for the keywords found as whole words. "fuzzy" = accepted only through the rapidfuzz ratio (for example
+    the fragments FANT and ANTA for FANTA). ZERO glued to AZUCAR(ES) and RETORNABLES count as exact. BILZ and PEPSI (`include_other`) are
+    exact whole words only."""
     require_ocr()
     toks = tokens(text)
-    found = set()
+    found: dict[str, str] = {}
+
+    def add(word: str, kind: str):
+        if found.get(word) != "exact":                      # an exact reading wins over a fuzzy one
+            found[word] = kind
     for t in toks:
         if _ZERO_GLUED.match(t):
-            found.add("ZERO")
+            add("ZERO", "exact")
         for word in ("SPRITE", "FANTA", "LIGHT", "RETORNABLE"):
-            if t == word or (len(word) >= 5 and len(t) >= 4 and _similar(t, word, min_ratio)):
-                found.add(word)
+            if t == word:
+                add(word, "exact")
+            elif len(word) >= 5 and len(t) >= 4 and _similar(t, word, min_ratio):
+                add(word, "fuzzy")
         if t == "RETORNABLES":
-            found.add("RETORNABLE")
+            add("RETORNABLE", "exact")
+        if include_other and t in OTHER_BRAND_WORDS:
+            add(t, "exact")
     if any(a == "COCA" and b == "COLA" for a, b in zip(toks, toks[1:])) or "COCACOLA" in toks:
-        found.add("COCA-COLA")
+        add("COCA-COLA", "exact")
     return found
+
+
+def keywords_read(text: str, min_ratio: float = 0.85, include_other: bool = True) -> set[str]:
+    """The keywords found as whole words in the text (see keywords_detail)."""
+    return set(keywords_detail(text, min_ratio, include_other))

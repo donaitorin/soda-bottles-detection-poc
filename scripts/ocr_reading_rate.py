@@ -51,7 +51,7 @@ def analyse(readings: dict, c7: dict) -> dict:
     rows = []
     for cid, r in readings.items():
         text = " ".join(t for t, _ in r["pieces"])
-        rows.append({"id": cid, "label": r["label"], "h": r["height"], "text": text, "kw": keywords_read(text, ratio), "toks": set(tokens(text))})
+        rows.append({"id": cid, "label": r["label"], "h": r["height"], "text": text, "kw": keywords_read(text, ratio, include_other=False), "toks": set(tokens(text))})
     expect = {k: set(v) for k, v in c7["expect"].items()}
 
     def wrong(row):                                                  # a decisive word the label does not allow (never for unknown labels)

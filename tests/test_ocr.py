@@ -80,3 +80,28 @@ def test_variant_a_modules_run_without_the_ocr_packages(hidden_ocr_packages):
     from src.embeddings.experiments import decide_prob, prob_features
     feat = prob_features(np.array([[0.9, 0.02, 0.02, 0.02, 0.02, 0.01, 0.01]]), ["a", "b", "c", "d", "e", "f"])
     assert decide_prob(feat, 0.3, 0.75)[0] == "automatic"
+
+
+def test_other_brand_words_are_exact_whole_words_only():
+    from src.ocr.evidence import keywords_detail, keywords_read
+    assert keywords_detail("PEPSI MAX") == {"PEPSI": "exact"} and keywords_read("bilz y pap") == {"BILZ"}
+    assert keywords_read("EPSI") == set() and keywords_read("PEPSIS") == set() and keywords_read("BILZA") == set()      # no fuzzy matching for them
+    assert keywords_read("PEPSI", include_other=False) == set()
+
+
+def test_exact_and_fuzzy_kinds():
+    from src.ocr.evidence import keywords_detail
+    assert keywords_detail("FANT 1,5") == {"FANTA": "fuzzy"} and keywords_detail("ANTA") == {"FANTA": "fuzzy"}
+    assert keywords_detail("FANTA") == {"FANTA": "exact"} and keywords_detail("FANT FANTA") == {"FANTA": "exact"}
+    assert keywords_detail("ZEROAZUCAR") == {"ZERO": "exact"}
+
+
+def test_demo_use_ocr_stops_with_the_install_message_when_the_packages_cannot_be_imported():
+    """Run the real demo script with easyocr made un-importable: it must exit with the clear message before touching any photo or model."""
+    import subprocess
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    code = ("import sys, runpy; sys.modules['easyocr'] = None; sys.argv = ['demo_identify.py', '--image', 'does-not-matter.jpg', '--use-ocr']; "
+            "runpy.run_path('scripts/demo_identify.py', run_name='__main__')")
+    r = subprocess.run([sys.executable, "-c", code], cwd=root, capture_output=True, text=True)
+    assert r.returncode != 0 and "pip install -r requirements-ocr.txt" in (r.stderr + r.stdout)

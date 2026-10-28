@@ -8,6 +8,7 @@ ocr:
   model_dir: models/ocr                 # gitignored; the same two weight files as the throwaway trial (hashes in the model card)
   upscale_to_min_height_px: 900         # a crop shorter than this is upscaled to it before reading (the trial: more text found; speed about the same)
   margin: 0.10                          # the SAME 10% margin crop as the classifier
+  min_height_px: 150                    # reading floor (owner decision, Stage 7 tasks 1-4): crops shorter than this are not read; the demo has --ocr-min-height to change it
   fuzzy_min_ratio: 0.85                 # rapidfuzz ratio for words of 5 or more letters; 4-letter words must match exactly (or glued, see evidence.py)
 keywords: [COCA-COLA, ZERO, LIGHT, RETORNABLE, SPRITE, FANTA]
 expect:                                 # words a correct bottle of the product may show (a lower bound: some photos show the back)
@@ -33,3 +34,33 @@ reading_rate:                           # scripts/ocr_reading_rate.py, on the la
 timing:                                 # seconds per photo, A and B, on the real device
   n_photos: 10
   split: val                            # timing only: nothing about labels or answers is looked at
+
+# ---- Tasks 5 to 8 (owner approved the rules of reports/stage_07_proposal.md and the answers to tasks 1-4). DECLARED BEFORE ANY VAL NUMBER.
+other_brand_words: [BILZ, PEPSI]       # owner decision: exact whole words only (no fuzzy matching), evidence for `unknown` (brands that are not target products)
+evidence:
+  p_ctx: 0.05                           # SPRITE / FANTA boost only if the classifier already gives that product at least this probability
+  p_ctx_coca: 0.30                      # LIGHT / ZERO / RETORNABLE boost only if the total Coca-Cola probability is at least this, or COCA-COLA is read
+  # Weights are tuned leaving one val store out, by the Stage 6 utility. The grid is walked in this order and only a STRICT improvement replaces
+  # the best, so ties go to the first (all zeros = exactly variant A). `contradiction` is an on/off switch for the hard rules 3 and 5 (an
+  # automatic answer goes to review when a word of a different product is read): the proposal said "all weights 0 is variant A", which needs
+  # these hard rules to have a switch too (a small, declared extension).
+  grid: {w_brand: [0, 1, 2, 4], w_variant: [0, 1, 2, 4], w_unknown: [0, 2], contradiction: [0, 1]}
+# DIAGNOSTIC (not part of the keep-rule), declared before its numbers: because the tuning may decline OCR (all zeros = A), B is ALSO run with this FIXED
+# setting (thresholds still tuned leaving one store out) to show what the rules do when forced on: fixes and new errors, exact words against fuzzy fragments.
+diagnostic_forced: {w_brand: 2, w_variant: 2, w_unknown: 2, contradiction: 1}
+variant_b:
+  readings_val: data/ocr/stage7/val_sample_readings.json   # gitignored: text read on the 180 val crops (crop id -> pieces)
+  results_dir: data/results/stage7                          # gitignored
+# KEEP-RULE for B (declared in the proposal, with one interpretation fixed here before any number): all must hold as point estimates on the
+# 180 val crops, A and B both leaving one store out:
+#  (1) fixes minus new errors >= +3 on the OUTCOME of all labeled crops. Status of a crop: known: right = automatic with the right product, wrong =
+#      automatic with a wrong product or rejected as unknown, neutral = review; unknown: right = rejected as unknown, wrong = automatic, neutral = review.
+#      fix = wrong in A and right in B; new error = right in A and wrong in B. (The weak spots are mostly outcome errors: the top-1 product of a
+#      sprite rejected as unknown was often right already, so top-1 counts are reported too but cannot carry the rule.)
+#  (2) top-1 over the known crops not lower than A; (3) false known not up by more than 2 points and mean utility not down by more than 0.02;
+#  (4) the paired 95% interval (by store) of the top-1 difference not entirely below zero. "Clear improvement" only if that interval is above zero.
+# Demo setting for scripts/demo_identify.py --use-ocr. UNTUNED: on val the leave-one-store-out tuning declined OCR (all weights 0 = variant A), so a
+# demo with those weights would show nothing. These are the declared diagnostic weights, so that the rules act and can be inspected and tuned on the
+# demo set (larger, sharper crops); the thresholds are those of the variant A demo. Override with --w-brand/--w-variant/--w-unknown/--no-contradiction.
+demo_b:
+  weights: {w_brand: 2, w_variant: 2, w_unknown: 2, contradiction: 1}
