@@ -108,3 +108,15 @@ def test_drawing_and_json_with_candidates():
     assert j["boxes"][0]["candidates"] == {"kind": "brand", "brand": "coca", "items": [{"product": "coca_zero", "similarity": 0.83}, {"product": "coca_classic", "similarity": 0.8}]}
     assert "candidates" not in j["boxes"][1]
     json.dumps(j)
+
+
+def test_variant_b_panel_line_and_json_carry_the_ocr_words_and_rules():
+    ocr = {"read": True, "text": "FANT 1,5 L", "words": {"FANTA": "fuzzy"}, "rules": ["boost_fanta"]}
+    assert panel_entry(2, "automatic", TOP3, ocr=ocr) == ["#2  coca_zero  0.83", "   OCR: FANTA~ | boost_fanta"]
+    assert panel_entry(2, "review", TOP3, ocr={"read": True, "text": "xx", "words": {}, "rules": []}) == panel_entry(2, "review", TOP3)   # nothing read: no line
+    img = Image.new("RGB", (400, 800), (255, 255, 255))
+    boxes = np.array([[20, 100, 100, 300]], float)
+    draw_result(img, boxes, ["automatic"], [TOP3], COLOURS, PANEL, "demo", ocr=[ocr])
+    j = build_json("x", (400, 800), boxes, np.array([0.9]), ["automatic"], [TOP3], {}, ocr=[ocr])
+    assert j["boxes"][0]["ocr"] == {"read": True, "text": "FANT 1,5 L", "words": {"FANTA": "fuzzy"}, "rules": ["boost_fanta"]}
+    json.dumps(j)

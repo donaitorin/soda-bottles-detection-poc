@@ -9,6 +9,10 @@ Output: the photo with numbered boxes coloured by decision (green automatic, blu
 with every box. Test-split photos are REFUSED (the input file's hash is compared with the raw photos of the test split). Raw photo file
 names (they hold store and uploader names) are never printed or written: a photo that is in the dataset is named by its anonymous id.
 
+Variant B (`--use-ocr`, classifier scorer only): EasyOCR reads each crop at least `--ocr-min-height` px tall (default configs/stage7.yaml ocr.min_height_px) and the
+words it finds change the probabilities (src/ocr/combine.py). The panel shows the words read and the rules that fired; the JSON gets the OCR text per box.
+It needs `pip install -r requirements-ocr.txt` and stops with a clear message without it. Variant B weights are UNTUNED demo weights (configs/stage7.yaml demo_b).
+
 Usage: python scripts/demo_identify.py --image PATH [--out PATH]   (inputs can live in data/demo/inputs/, outputs go to data/demo/outputs/)
 """
 import argparse
@@ -59,6 +63,21 @@ def run(args) -> int:
     scfg = yaml.safe_load((REPO_ROOT / "configs/stage5.yaml").read_text())
     s1 = yaml.safe_load((REPO_ROOT / "configs/stage1.yaml").read_text())
     dc, ec, idc, products = cfg["demo"], cfg["embeddings"], cfg["identify"], cfg["products"]
+    c7 = None
+    if args.use_ocr:
+        if args.scorer != "classifier":
+            raise SystemExit("--use-ocr works with the classifier scorer (variant B is the classifier plus OCR evidence).")
+        from src.ocr.reader import OcrUnavailable, require_ocr          # imported only for variant B: variant A never touches src.ocr
+        try:
+            require_ocr()
+        except OcrUnavailable as error:
+            raise SystemExit(str(error))
+        c7 = yaml.safe_load((REPO_ROOT / "configs/stage7.yaml").read_text())
+        floor = args.ocr_min_height if args.ocr_min_height is not None else c7["ocr"]["min_height_px"]
+        w = {**c7["demo_b"]["weights"], **{k: v for k, v in (("w_brand", args.w_brand), ("w_variant", args.w_variant), ("w_unknown", args.w_unknown)) if v is not None}}
+        if args.no_contradiction:
+            w["contradiction"] = 0
+        words_of = {p: set(v) for p, v in c7["expect"].items()}
     protected = [REPO_ROOT / d for d in s1["protected_dirs"]]
     path = Path(args.image)
     if not path.is_file():
@@ -102,9 +121,15 @@ def run(args) -> int:
         classifier = LinearClassifier.load(mpath)
         card = json.loads(mpath.with_name(mpath.stem + "_card.json").read_text())
         classifier_card = {"date_utc": card["date_utc"], "C": card["settings"]["C"], "n_crops": card["training_data"]["n_crops"], "labels_file_sha256": card["training_data"]["labels_file_sha256"][:12]}
+    ocr_reader = None
+    if args.use_ocr:
+        from src.ocr.reader import OcrReader
+        ocr_reader = OcrReader(c7["ocr"], REPO_ROOT, device)
     warm = Image.new("RGB", (320, 320), (128, 128, 128))              # first calls on MPS include one-time setup: do it before timing
     frcnn.detect(det, 1, warm, device)
     embed(dino, [warm, warm], device, {**ec, "batch_size": 2})
+    if ocr_reader:
+        ocr_reader.read(warm)
     sync(device)
     t_load = time.perf_counter() - t0
     image = load_image(path)
@@ -126,7 +151,8 @@ def run(args) -> int:
     t_emb = time.perf_counter() - t2
 
     t3 = time.perf_counter()
-    decisions, top3s, cands = [], [], []
+    decisions, top3s, cands, ocr_boxes = [], [], [], None
+    t_ocr = 0.0
     if len(vecs):
         def catalog_features():
             """Features from the database search (catalog (b)): the fallback scorer, and the similarity candidate lists."""
@@ -152,8 +178,23 @@ def run(args) -> int:
 
         if args.scorer == "classifier":
             # adopted scorer: logistic regression on the CLS embedding (probabilities over 6 products + unknown)
-            feat = prob_features(classifier.predict_proba(vecs), products)
+            proba = classifier.predict_proba(vecs)
+            if args.use_ocr:
+                from src.ocr.combine import combine, contradicts
+                from src.ocr.evidence import keywords_detail
+                t4 = time.perf_counter()
+                texts = [" ".join(t for t, _ in ocr_reader.read(c)) if c.height >= floor else None for c in crops]
+                sync(device)
+                t_ocr = time.perf_counter() - t4
+                evidence = [keywords_detail(t, c7["ocr"]["fuzzy_min_ratio"]) if t is not None else {} for t in texts]
+                proba, infos = combine(proba, products, evidence, w, c7["evidence"], c7["other_brand_words"])
+            feat = prob_features(proba, products)
             outcome = decide_prob(feat, th["t_unk"], th["t_auto"])
+            if args.use_ocr:
+                contra = contradicts(np.array(products, dtype=object)[feat["top1"]], evidence, words_of) & (outcome == AUTO) & bool(w["contradiction"])
+                outcome[contra] = REVIEW                                  # rule 3: an automatic answer with a word of another product read goes to a person
+                ocr_boxes = [{"read": t is not None, "text": t or "", "words": ev, "rules": inf["rules"] + (["contradiction"] if contra[i] else [])}
+                             for i, (t, ev, inf) in enumerate(zip(texts, evidence, infos))]
             if cc["list_source"] == "probability":
                 lfeat, delta = feat, cc["candidates"]["delta"]
             else:                                        # similarity lists from the database (Stage 6d rule chose probability lists; this is the other option)
@@ -176,7 +217,7 @@ def run(args) -> int:
     t_search = time.perf_counter() - t3
 
     title = image_name
-    canvas = draw_result(image, boxes, decisions, top3s, dc["colours"], dc["panel"], title, cands, dc["names"])
+    canvas = draw_result(image, boxes, decisions, top3s, dc["colours"], dc["panel"], title, cands, dc["names"], ocr_boxes)
     canvas.save(out_img, quality=90)
     counts = {k: decisions.count(k) for k in (AUTO, CANDIDATES, REVIEW, UNKNOWN)}
     result = build_json(image_name, image.size, boxes, scores, decisions, top3s,
@@ -185,11 +226,12 @@ def run(args) -> int:
                                       "scorer": args.scorer, "scores_are": "probabilities (6 products + unknown)" if args.scorer == "classifier" else "cosine similarities to catalog (b)",
                                       "model_card": classifier_card, "candidate_lists": cc["list_source"] if args.scorer == "classifier" else "similarity", "thresholds": th,
                                       "candidates": cc["candidates"] if args.scorer == "classifier" else dc["candidates"],
-                                      "note": "DEMO thresholds, tuned once on the labeled val crops: not an evaluation result", "warning": train_warning},
-                         "decisions": counts, "seconds": {"load_models_and_warm_up": round(t_load, 2), "detection": round(t_det, 3), "embeddings": round(t_emb, 3), "search_and_rules": round(t_search, 3)}}, cands)
+                                      "note": "DEMO thresholds, tuned once on the labeled val crops: not an evaluation result", "warning": train_warning,
+                                      **({"variant": "B (embeddings + OCR)", "ocr_min_height": floor, "ocr_weights": w, "ocr_note": "UNTUNED demo weights (val tuning declined OCR)"} if args.use_ocr else {"variant": "A (embeddings)"})},
+                         "decisions": counts, "seconds": {"load_models_and_warm_up": round(t_load, 2), "detection": round(t_det, 3), "embeddings": round(t_emb, 3), "search_and_rules": round(t_search, 3), **({"ocr": round(t_ocr, 3)} if args.use_ocr else {})}}, cands, ocr_boxes)
     out_json.write_text(json.dumps(result, indent=1))
     print(f"{len(boxes)} boxes: automatic {counts[AUTO]}, candidates {counts[CANDIDATES]}, review {counts[REVIEW]}, unknown {counts[UNKNOWN]}")
-    print(f"timing on {device}: load models + warm-up {t_load:.1f} s (once) | detection {t_det:.2f} s | embeddings {t_emb:.2f} s ({len(crops)} crops) | scoring + rules {t_search:.2f} s")
+    print(f"timing on {device}: load models + warm-up {t_load:.1f} s (once) | detection {t_det:.2f} s | embeddings {t_emb:.2f} s ({len(crops)} crops) | scoring + rules {t_search:.2f} s" + (f" | OCR {t_ocr:.2f} s ({sum(o['read'] for o in ocr_boxes or [])} crops read)" if args.use_ocr else ""))
     print(f"image: {out_img.relative_to(REPO_ROOT) if out_img.is_relative_to(REPO_ROOT) else out_img.name}\njson:  {out_json.relative_to(REPO_ROOT) if out_json.is_relative_to(REPO_ROOT) else out_json.name}")
     return 0
 
@@ -206,6 +248,12 @@ def main() -> int:
     parser.add_argument("--t-margin", type=float, help="override the demo margin threshold")
     parser.add_argument("--t-vote", type=float, help="override the demo vote threshold")
     parser.add_argument("--t-neg", type=float, help="override the demo negative-gap threshold (unknown if a negative example is closer than the top-1 product by more than this)")
+    parser.add_argument("--use-ocr", action="store_true", help="variant B: add OCR evidence (needs requirements-ocr.txt; classifier scorer only)")
+    parser.add_argument("--ocr-min-height", type=int, help="variant B: read only crops at least this many pixels tall (default: configs/stage7.yaml ocr.min_height_px, 150)")
+    parser.add_argument("--w-brand", type=float, help="variant B: override the SPRITE/FANTA boost weight")
+    parser.add_argument("--w-variant", type=float, help="variant B: override the LIGHT/ZERO/RETORNABLE boost weight")
+    parser.add_argument("--w-unknown", type=float, help="variant B: override the push-to-unknown weight (not-a-target combinations, BILZ, PEPSI)")
+    parser.add_argument("--no-contradiction", action="store_true", help="variant B: switch off the rule that sends an automatic answer to review when a word of another product is read")
     args = parser.parse_args()
     try:
         return run(args)
