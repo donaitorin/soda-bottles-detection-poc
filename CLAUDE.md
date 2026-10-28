@@ -169,6 +169,14 @@ python scripts/evaluate_answer_types.py --scorer classifier   # candidate lists 
 python scripts/evaluate_stage6_gate.py           # the Stage 6 gate with the adopted scorer: brand, top-3, unknown handling, named confusions (development numbers)
 ```
 
+Stage 7, variant B (inside `soda-poc`; tasks 1 to 4 so far; OCR packages only for variant B, weights in models/ocr; TRAIN shelf entries only for any choice, val is not read; variant B must stay runnable whatever the val result, to be measured again on the demo set):
+
+```bash
+pip install -r requirements-ocr.txt              # easyocr and friends (python-bidi and the FFmpeg libs of opencv-python-headless are LGPL: owner-approved exceptions); then `pip check`
+python scripts/ocr_reading_rate.py [--reread]    # what the OCR reads on the labeled TRAIN shelf entries by crop height, words per product, extra-word proposals (rules in configs/stage7.yaml)
+python scripts/ocr_timing.py                     # seconds per photo of variant A and B on MPS (10 val photos, timing only)
+```
+
 OCR trial (decision input only; the ONE exception to "everything runs in soda-poc": it runs in the throwaway conda env `ocr-trial`, never in soda-poc; EasyOCR, python-bidi (LGPL) and pytesseract are accepted for the trial only and are never added to requirements.txt or the pipeline):
 
 ```bash

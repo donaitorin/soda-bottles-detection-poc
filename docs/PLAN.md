@@ -253,6 +253,8 @@ Any bottle that is not one of the 6 target products must end up as `unknown`. Th
 
 **Gate:** both variants run and are compared on val. OCR stays as an option only if it reduces the specific confusions found in stage 6 (otherwise the report says it did not help).
 
+**Owner note (Stage 7 approval):** whatever the val result, variant B stays runnable (the OCR module, `requirements-ocr.txt`, the `use_ocr` option), so it can be measured again on the demo set, where the crops will be larger and sharper than the val crops.
+
 ### Stage 8: confidence and decision
 
 **Goal:** make the system know when it does not know.
