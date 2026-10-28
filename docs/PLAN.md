@@ -253,6 +253,8 @@ Any bottle that is not one of the 6 target products must end up as `unknown`. Th
 
 **Gate:** both variants run and are compared on val. OCR stays as an option only if it reduces the specific confusions found in stage 6 (otherwise the report says it did not help).
 
+**Result of Stage 7 (details in `reports/stage_07.md`; development numbers on 180 val crops):** both variants run and were compared. Variant B, tuned leaving one store out, chose no OCR on every fold, so B equals A (0 fixes, 0 new errors); none of the 14 weak-spot crops had a keyword read, and with the rules forced on B is slightly worse (utility 0.323 against 0.444). The Coca variant words (LIGHT, ZERO) and the Coca-Cola logo are never read at these crop sizes. OCR is **not adopted**; it stays implemented and runnable (`--use-ocr`, `requirements-ocr.txt`) for a re-measurement on the demo set.
+
 **Owner note (Stage 7 approval):** whatever the val result, variant B stays runnable (the OCR module, `requirements-ocr.txt`, the `use_ocr` option), so it can be measured again on the demo set, where the crops will be larger and sharper than the val crops.
 
 ### Stage 8: confidence and decision
