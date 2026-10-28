@@ -1,0 +1,15 @@
+# Pipeline variant B (Stage 7): OCR as evidence. Installed ONLY for variant B: pip install -r requirements-ocr.txt
+# Variant A (requirements.txt) runs without any of this. Owner-approved exceptions to "permissive licences only":
+#   python-bidi (LGPL) and the FFmpeg libraries bundled in the opencv-python-headless wheel (LGPL): both used unmodified, loaded dynamically, isolated here.
+# torch, torchvision, numpy, scipy and pillow come from requirements.txt and must not change version.
+easyocr==1.7.2                 # Apache-2.0
+rapidfuzz==3.14.6              # MIT (fuzzy word matching)
+opencv-python-headless==5.0.0.93   # Apache-2.0 (wheel bundles LGPL FFmpeg libraries)
+pyclipper==1.4.0               # MIT
+python-bidi==0.6.12            # LGPL (documented exception)
+scikit-image==0.26.0           # BSD-3-Clause
+shapely==2.2.0                 # BSD-3-Clause
+imageio==2.38.1                # BSD-2-Clause
+lazy-loader==0.6               # BSD-3-Clause
+ninja==1.13.2                  # Apache-2.0
+tifffile==2026.3.3             # BSD-3-Clause

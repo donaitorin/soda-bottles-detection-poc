@@ -1,0 +1,35 @@
+# Stage 7, pipeline variant B: OCR as evidence on top of the Stage 6 classifier (variant A). Tasks 1 to 4 (reading policy); the rules of
+# tasks 5 to 8 come after the owner has seen the reading-rate table. All numbers are development numbers.
+seed: 0
+config_stage6: configs/stage6.yaml
+ocr:
+  engine: easyocr
+  languages: [en, es]
+  model_dir: models/ocr                 # gitignored; the same two weight files as the throwaway trial (hashes in the model card)
+  upscale_to_min_height_px: 900         # a crop shorter than this is upscaled to it before reading (the trial: more text found; speed about the same)
+  margin: 0.10                          # the SAME 10% margin crop as the classifier
+  fuzzy_min_ratio: 0.85                 # rapidfuzz ratio for words of 5 or more letters; 4-letter words must match exactly (or glued, see evidence.py)
+keywords: [COCA-COLA, ZERO, LIGHT, RETORNABLE, SPRITE, FANTA]
+expect:                                 # words a correct bottle of the product may show (a lower bound: some photos show the back)
+  coca_classic: [COCA-COLA]
+  coca_classic_returnable: [COCA-COLA, RETORNABLE]
+  coca_zero: [COCA-COLA, ZERO]
+  coca_light: [COCA-COLA, LIGHT]
+  sprite: [SPRITE]
+  fanta: [FANTA]
+reading_rate:                           # scripts/ocr_reading_rate.py, on the labeled TRAIN shelf entries only (val is never read for these choices)
+  output_dir: data/ocr/stage7            # gitignored: readings per crop id (text only)
+  height_buckets_px: [0, 150, 200, 250, 300, 350, 400, 500, 700]   # lower edges; heights are of the crop in original pixels
+  # DECLARED BEFORE ANY NUMBER. Minimum reading height = the LOWEST value h of height_buckets_px (above 0) such that, among TRAIN
+  # crops of height >= h with a keyword read (the 6 keywords above): (a) at least `min_reading_crops` crops have one, and (b) at least
+  # `min_consistent_share` of them are consistent: no keyword of a variant/brand word that the label does not allow (`expect` above;
+  # crops labeled unknown are counted apart and are not "wrong"). If no h qualifies, there is no minimum: OCR is not usable on this data.
+  min_reading_crops: 5
+  min_consistent_share: 0.90
+  # Extra words from TRAIN readings (proposed, never added automatically): a normalised word of 4 or more letters read on at least
+  # `word_min_crops` crops of ONE label and on NO crop of any other label (unknown included), above the minimum height.
+  word_min_crops: 3
+  watch_words: [AZUCAR, SIN, SUGAR, FREE, CERO, ZERO, LIGHT, CALORIAS, DIET, SPRITE, FANTA, RETORNABLE, RETORNABLES, COCA, COLA]
+timing:                                 # seconds per photo, A and B, on the real device
+  n_photos: 10
+  split: val                            # timing only: nothing about labels or answers is looked at
